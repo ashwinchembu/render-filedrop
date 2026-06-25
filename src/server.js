@@ -8,9 +8,13 @@ import {
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import helmet from "helmet";
 import multer from "multer";
+import * as z from "zod/v4";
 
 const app = express();
 app.set("trust proxy", true);
@@ -29,6 +33,7 @@ const s3ForcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
 
 const filesDir = path.join(storageDir, "files");
 const metaPath = path.join(storageDir, "metadata.json");
+const mcpTransports = {};
 
 const s3 =
   storageDriver === "s3"
@@ -176,15 +181,22 @@ function requireWebPassword(req, res, next) {
 }
 
 function requireApiKey(req, res, next) {
+  if (hasValidApiKey(req)) {
+    next();
+    return;
+  }
+  res.status(401).json({ error: "Invalid API key" });
+}
+
+function hasValidApiKey(req) {
   const auth = req.header("authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : req.header("x-api-key");
   const provided = Buffer.from(token || "");
   const expected = Buffer.from(apiKey);
   if (provided.length === expected.length && crypto.timingSafeEqual(provided, expected)) {
-    next();
-    return;
+    return true;
   }
-  res.status(401).json({ error: "Invalid API key" });
+  return false;
 }
 
 function publicFile(file, req) {
@@ -242,8 +254,289 @@ async function updateFileMetadata(id, body) {
   return file;
 }
 
+function mcpRequest(req) {
+  const protocol = req.header("x-forwarded-proto") || req.protocol;
+  const hostName = req.get("host");
+  return { protocol, get: (name) => (name.toLowerCase() === "host" ? hostName : req.get(name)) };
+}
+
+function mcpTextAndStructured(text, structuredContent = {}) {
+  return {
+    content: [{ type: "text", text }],
+    structuredContent
+  };
+}
+
+function filterFiles(files, query) {
+  const needle = cleanText(query, 120).toLowerCase();
+  if (!needle) return files;
+  return files.filter((file) => {
+    const haystack = [
+      file.originalName,
+      file.category,
+      file.note,
+      ...(Array.isArray(file.tags) ? file.tags : [])
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
+function groupFiles(files, groupBy) {
+  if (!groupBy || groupBy === "none") return {};
+
+  return files.reduce((groups, file) => {
+    const date = new Date(file.uploadedAt);
+    let key = file.category || "Uncategorized";
+    if (groupBy === "day") key = Number.isNaN(date.valueOf()) ? "Unknown date" : date.toISOString().slice(0, 10);
+    if (groupBy === "month") key = Number.isNaN(date.valueOf()) ? "Unknown month" : date.toISOString().slice(0, 7);
+    groups[key] ||= [];
+    groups[key].push(file.id);
+    return groups;
+  }, {});
+}
+
+async function importChatGptRefs(refs, body, req) {
+  if (!Array.isArray(refs) || !refs.length) {
+    const error = new Error("Missing openaiFileIdRefs");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (refs.length > 10) {
+    const error = new Error("Only up to 10 files can be imported at once");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const imported = [];
+  for (const ref of refs) {
+    const downloadLink = ref?.download_link || ref?.downloadLink;
+    if (!downloadLink) continue;
+
+    const response = await fetch(downloadLink);
+    if (!response.ok) {
+      throw new Error(`Could not fetch ${ref.name || ref.id || "file"}: ${response.status}`);
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const record = await saveBufferFile(
+      {
+        buffer: bytes,
+        originalname: ref.name || "chatgpt-upload",
+        mimetype: ref.mime_type || ref.mimeType || response.headers.get("content-type") || "application/octet-stream",
+        size: bytes.length
+      },
+      body
+    );
+    imported.push(publicFile(record, req));
+  }
+
+  return imported;
+}
+
+async function saveUrlFile({ url, name, category, tags, note }, req) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const error = new Error(`Could not fetch URL: ${response.status}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const parsedUrl = new URL(url);
+  const fallbackName = path.basename(parsedUrl.pathname) || "download";
+  const record = await saveBufferFile(
+    {
+      buffer: bytes,
+      originalname: cleanText(name, 240) || decodeURIComponent(fallbackName),
+      mimetype: response.headers.get("content-type") || "application/octet-stream",
+      size: bytes.length
+    },
+    { category, tags, note }
+  );
+  return publicFile(record, req);
+}
+
+function createMcpServer(req) {
+  const server = new McpServer({
+    name: "private-filedrop",
+    version: "1.0.0"
+  });
+  const publicReq = mcpRequest(req);
+
+  server.registerTool(
+    "list_files",
+    {
+      title: "List files",
+      description: "List stored files, optionally filtered and grouped by day, month, or category.",
+      inputSchema: {
+        query: z.string().optional().describe("Optional search text for filename, category, tags, or notes."),
+        groupBy: z.enum(["none", "day", "month", "category"]).optional().describe("How to group the returned files.")
+      }
+    },
+    async ({ query, groupBy = "day" }) => {
+      const meta = await readMeta();
+      const files = filterFiles(meta.files, query).map((file) => publicFile(file, publicReq));
+      const groups = groupFiles(files.map((file) => ({
+        id: file.id,
+        category: file.category,
+        uploadedAt: file.uploadedAt
+      })), groupBy);
+      const summary = files.length
+        ? files.map((file) => `${file.id} | ${file.uploadedAt.slice(0, 10)} | ${file.name}`).join("\n")
+        : "No files found.";
+      return mcpTextAndStructured(summary, { files, groups });
+    }
+  );
+
+  server.registerTool(
+    "import_chatgpt_files",
+    {
+      title: "Import ChatGPT files",
+      description: "Import files attached to the current ChatGPT conversation into the private filedrop.",
+      inputSchema: {
+        openaiFileIdRefs: z.array(z.any()).describe("ChatGPT file reference objects with download_link fields."),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional(),
+        note: z.string().optional()
+      }
+    },
+    async ({ openaiFileIdRefs, category, tags, note }) => {
+      const files = await importChatGptRefs(openaiFileIdRefs, { category, tags, note }, publicReq);
+      return mcpTextAndStructured(`Imported ${files.length} file(s).`, { files });
+    }
+  );
+
+  server.registerTool(
+    "upload_from_url",
+    {
+      title: "Upload from URL",
+      description: "Fetch a file from a URL and save it in the private filedrop.",
+      inputSchema: {
+        url: z.url().describe("A downloadable URL."),
+        name: z.string().optional().describe("Optional stored filename."),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional(),
+        note: z.string().optional()
+      }
+    },
+    async (input) => {
+      const file = await saveUrlFile(input, publicReq);
+      return mcpTextAndStructured(`Uploaded ${file.name}.`, { file });
+    }
+  );
+
+  server.registerTool(
+    "organize_file",
+    {
+      title: "Organize file",
+      description: "Update a stored file's category, tags, or note.",
+      inputSchema: {
+        id: z.string().describe("File ID from list_files."),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional(),
+        note: z.string().optional()
+      }
+    },
+    async ({ id, category, tags, note }) => {
+      const file = await updateFileMetadata(id, { category, tags, note });
+      if (!file) throw new Error("File not found");
+      const publicRecord = publicFile(file, publicReq);
+      return mcpTextAndStructured(`Updated ${publicRecord.name}.`, { file: publicRecord });
+    }
+  );
+
+  server.registerTool(
+    "get_file_link",
+    {
+      title: "Get file link",
+      description: "Get the direct download link and metadata for a stored file.",
+      inputSchema: {
+        id: z.string().describe("File ID from list_files.")
+      }
+    },
+    async ({ id }) => {
+      const meta = await readMeta();
+      const file = meta.files.find((item) => item.id === id);
+      if (!file) throw new Error("File not found");
+      const publicRecord = publicFile(file, publicReq);
+      return mcpTextAndStructured(`${publicRecord.name}: ${publicRecord.downloadUrl}`, { file: publicRecord });
+    }
+  );
+
+  return server;
+}
+
+async function handleMcpRequest(req, res) {
+  if (!apiKey) {
+    res.status(503).json({ error: "API_KEY is not configured" });
+    return;
+  }
+  if (!hasValidApiKey(req)) {
+    res.status(401).json({ error: "Invalid API key" });
+    return;
+  }
+
+  const sessionId = req.headers["mcp-session-id"];
+  let transport = sessionId ? mcpTransports[sessionId] : null;
+  if (!transport && req.method === "POST" && isInitializeRequest(req.body)) {
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (newSessionId) => {
+        mcpTransports[newSessionId] = transport;
+      }
+    });
+    transport.onclose = () => {
+      if (transport.sessionId) delete mcpTransports[transport.sessionId];
+    };
+    const server = createMcpServer(req);
+    await server.connect(transport);
+  }
+
+  if (!transport) {
+    res.status(req.method === "GET" ? 405 : 400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: req.method === "GET" ? "Method Not Allowed" : "Bad Request: No valid MCP session"
+      },
+      id: null
+    });
+    return;
+  }
+
+  await transport.handleRequest(req, res, req.body);
+}
+
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true, storageDriver, storageConfigured: storageConfigured() });
+});
+
+app.post("/mcp", async (req, res, next) => {
+  try {
+    await handleMcpRequest(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/mcp", async (req, res, next) => {
+  try {
+    await handleMcpRequest(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/mcp", async (req, res, next) => {
+  try {
+    await handleMcpRequest(req, res);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post(
@@ -267,39 +560,7 @@ app.post(
 
 app.post("/api/chatgpt/import", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
-    const refs = Array.isArray(req.body?.openaiFileIdRefs) ? req.body.openaiFileIdRefs : [];
-    if (!refs.length) {
-      res.status(400).json({ error: "Missing openaiFileIdRefs" });
-      return;
-    }
-    if (refs.length > 10) {
-      res.status(400).json({ error: "Only up to 10 files can be imported at once" });
-      return;
-    }
-
-    const imported = [];
-    for (const ref of refs) {
-      const downloadLink = ref.download_link || ref.downloadLink;
-      if (!downloadLink) continue;
-
-      const response = await fetch(downloadLink);
-      if (!response.ok) {
-        throw new Error(`Could not fetch ${ref.name || ref.id || "file"}: ${response.status}`);
-      }
-
-      const bytes = Buffer.from(await response.arrayBuffer());
-      const record = await saveBufferFile(
-        {
-          buffer: bytes,
-          originalname: ref.name || "chatgpt-upload",
-          mimetype: ref.mime_type || ref.mimeType || response.headers.get("content-type") || "application/octet-stream",
-          size: bytes.length
-        },
-        req.body
-      );
-      imported.push(publicFile(record, req));
-    }
-
+    const imported = await importChatGptRefs(req.body?.openaiFileIdRefs, req.body, req);
     res.status(201).json({ files: imported });
   } catch (error) {
     next(error);

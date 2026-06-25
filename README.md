@@ -9,6 +9,7 @@ A tiny Render-hosted file bridge for moving files between computers.
 - Category, tag, and note fields for organizing files.
 - Unguessable public download links for individual files.
 - API-key-protected upload, list, and download endpoints.
+- MCP server endpoint for connecting as a ChatGPT custom app.
 - S3 or S3-compatible storage support through `render.yaml`.
 
 ## Deploy on Render
@@ -92,6 +93,30 @@ Suggested GPT instructions:
 
 ```text
 You are my private file transfer assistant. When I attach files and ask you to save, upload, transfer, or store them, call importChatGPTFiles. Ask for a category, tags, or note only when helpful. Use listFiles to find stored files. Use updateFileMetadata to organize files. Use returnFileToChatGPT when I ask to bring a stored file back into this chat.
+```
+
+## ChatGPT Custom App / MCP
+
+The app also exposes a Streamable HTTP MCP endpoint:
+
+```text
+https://your-render-service.onrender.com/mcp
+```
+
+Configure the MCP/custom app authentication as a Bearer token and use the same `API_KEY` from Render.
+
+Available MCP tools:
+
+- `list_files`: find stored files and group them by day, month, or category.
+- `import_chatgpt_files`: save files attached in ChatGPT into the filedrop.
+- `upload_from_url`: pull a downloadable URL into the filedrop.
+- `organize_file`: update category, tags, and note.
+- `get_file_link`: get the direct download link for a stored file.
+
+Suggested ChatGPT instructions:
+
+```text
+Use my Private Filedrop MCP tools to move files between computers. Save attached files with import_chatgpt_files, list stored files with list_files, organize files with organize_file, and give me direct links with get_file_link. Prefer categories like Work, Receipts, Personal, or Transfers when I do not specify one.
 ```
 
 ## Local Run
