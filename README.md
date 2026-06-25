@@ -23,7 +23,9 @@ A tiny Render-hosted file bridge for moving files between computers.
    - `UPLOAD_PASSWORD`: use this in the web page.
    - `API_KEY`: use this for API access.
 
-The blueprint uses Render's free web service plan with temporary local storage by default. Files survive ordinary requests, but can disappear when Render restarts the free instance.
+The blueprint uses Render's paid `starter` web service plan with a 1 GB persistent disk mounted at `/var/data/filedrop`. `STORAGE_DIR` points at that mount, so uploaded files, metadata, mailbox messages, channels, and webhook registrations survive deploys and service restarts.
+
+Do not set production `STORAGE_DIR` to `/tmp`; Render's `/tmp` storage is ephemeral and can wipe the mailbox, webhook registry, channels, and file metadata whenever the service restarts.
 
 For durable S3-compatible storage, set these environment variables in Render:
 
