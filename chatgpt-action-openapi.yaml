@@ -1,0 +1,149 @@
+openapi: 3.1.0
+info:
+  title: Private Filedrop ChatGPT Action
+  version: 1.0.0
+  description: Import files attached in ChatGPT into Private Filedrop, organize them, and retrieve download links.
+servers:
+  - url: https://private-filedrop.onrender.com
+security:
+  - bearerAuth: []
+paths:
+  /api/chatgpt/import:
+    post:
+      operationId: importChatGPTFiles
+      summary: Import files attached to the current ChatGPT conversation into the filedrop.
+      description: Use this when the user asks to save, upload, store, or transfer files they attached to ChatGPT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - openaiFileIdRefs
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  description: Files attached by the user in ChatGPT. Include up to 10 files from the conversation.
+                  items:
+                    type: string
+                category:
+                  type: string
+                  description: Optional folder/category label.
+                tags:
+                  type: string
+                  description: Optional comma-separated tags.
+                note:
+                  type: string
+                  description: Optional note about the upload.
+      responses:
+        "201":
+          description: Imported files with filedrop download links.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileRecord"
+  /api/files:
+    get:
+      operationId: listFiles
+      summary: List files stored in the filedrop.
+      responses:
+        "200":
+          description: Stored files.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileRecord"
+  /api/files/{id}:
+    patch:
+      operationId: updateFileMetadata
+      summary: Update category, tags, and note for a stored file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category:
+                  type: string
+                tags:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Updated file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileRecord"
+  /api/files/{id}/chatgpt-return:
+    get:
+      operationId: returnFileToChatGPT
+      summary: Return a stored file into the ChatGPT conversation.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File returned to ChatGPT.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  openaiFileResponse:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    FileRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+        mimeType:
+          type: string
+        uploadedAt:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        note:
+          type: string
+        downloadUrl:
+          type: string
+          format: uri

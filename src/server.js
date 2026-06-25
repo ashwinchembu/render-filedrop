@@ -137,6 +137,10 @@ async function writeFileObject(storageName, file) {
   await fs.writeFile(path.join(filesDir, storageName), file.buffer);
 }
 
+async function saveBufferFile({ buffer, originalname, mimetype, size }, body = {}) {
+  return saveUploadedFile({ buffer, originalname, mimetype, size }, body);
+}
+
 async function sendFileObject(res, file) {
   res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.originalName)}"`);
@@ -261,6 +265,47 @@ app.post(
   }
 );
 
+app.post("/api/chatgpt/import", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const refs = Array.isArray(req.body?.openaiFileIdRefs) ? req.body.openaiFileIdRefs : [];
+    if (!refs.length) {
+      res.status(400).json({ error: "Missing openaiFileIdRefs" });
+      return;
+    }
+    if (refs.length > 10) {
+      res.status(400).json({ error: "Only up to 10 files can be imported at once" });
+      return;
+    }
+
+    const imported = [];
+    for (const ref of refs) {
+      const downloadLink = ref.download_link || ref.downloadLink;
+      if (!downloadLink) continue;
+
+      const response = await fetch(downloadLink);
+      if (!response.ok) {
+        throw new Error(`Could not fetch ${ref.name || ref.id || "file"}: ${response.status}`);
+      }
+
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const record = await saveBufferFile(
+        {
+          buffer: bytes,
+          originalname: ref.name || "chatgpt-upload",
+          mimetype: ref.mime_type || ref.mimeType || response.headers.get("content-type") || "application/octet-stream",
+          size: bytes.length
+        },
+        req.body
+      );
+      imported.push(publicFile(record, req));
+    }
+
+    res.status(201).json({ files: imported });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post(
   "/web/upload",
   requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
@@ -333,6 +378,20 @@ app.get("/api/files/:id/download", requireConfiguredSecret(apiKey, "API_KEY"), r
       return;
     }
     await sendFileObject(res, file);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/files/:id/chatgpt-return", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const file = meta.files.find((item) => item.id === req.params.id);
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json({ openaiFileResponse: [publicFile(file, req).downloadUrl] });
   } catch (error) {
     next(error);
   }

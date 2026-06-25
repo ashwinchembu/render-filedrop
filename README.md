@@ -84,6 +84,16 @@ For a client that only needs to pull docs, grant it the API key and use:
 - `GET /api/files` to find available documents.
 - `GET /api/files/{id}/download` to fetch the selected document.
 
+## ChatGPT Custom GPT Action
+
+Use `chatgpt-action-openapi.yaml` for a Custom GPT Action. Configure authentication as Bearer token and paste the Render `API_KEY`.
+
+Suggested GPT instructions:
+
+```text
+You are my private file transfer assistant. When I attach files and ask you to save, upload, transfer, or store them, call importChatGPTFiles. Ask for a category, tags, or note only when helpful. Use listFiles to find stored files. Use updateFileMetadata to organize files. Use returnFileToChatGPT when I ask to bring a stored file back into this chat.
+```
+
 ## Local Run
 
 ```sh
