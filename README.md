@@ -99,9 +99,30 @@ Shared mailbox endpoints:
 - `GET /api/messages?unreadOnly=true`: list unread messages.
 - `PATCH /api/messages/<message-id>/read`: mark a message read.
 
+Use `/api/messages` only for Codex control-plane coordination: setup, status, blockers, and handoffs between `ashwin-main-codex` and `ashwin-remote-codex`.
+
+Conversation channel endpoints:
+
+- `POST /api/channels`: create or update a channel. Body: `id`, `name`, optional `description`, `category`, `tags`.
+- `GET /api/channels`: list channels.
+- `POST /api/channels/<channel-id>/messages`: post a channel message. Body: `from`, `body`, optional `category`, `tags`, `relatedFileId`, `relatedUrl`.
+- `GET /api/channels/<channel-id>/messages`: list channel messages. Query filters: `from`, `since`, `unreadOnly`, `category`, `tag`.
+- `PATCH /api/channels/<channel-id>/messages/<message-id>/read`: mark a channel message read.
+
+Use channel messages for mirrored chats, Teams streams, and other non-control conversations. For the Yashodeep Teams mirror, use:
+
+```text
+channel id: teams-yashodeep
+channel name: Teams/Yashodeep
+category: teams-sync
+tags: teams,yashodeep,mirror,chat
+from: teams-yashodeep-sync
+```
+
 Webhook endpoints:
 
 - `POST /api/webhooks`: register an outgoing webhook. Body: `url`, optional `name`, `to`, `secret`.
+- For channel pushes, use body fields `event="channel.message.created"` and `channelId="<channel-id>"`.
 - `GET /api/webhooks`: list registered webhooks.
 - `POST /api/webhooks/<webhook-id>/test`: send a test delivery.
 - `DELETE /api/webhooks/<webhook-id>`: delete a webhook.
@@ -171,6 +192,10 @@ Available MCP tools:
 
 - `list_files`: find stored files and group them by day, month, or category.
 - `list_projects`: list project buckets and version counts.
+- `create_channel`: create or update a conversation channel.
+- `list_channels`: list conversation channels.
+- `send_channel_message`: post a channel message.
+- `list_channel_messages`: read channel messages.
 - `send_message`: post a mailbox message for another session.
 - `list_messages`: read mailbox messages.
 - `mark_message_read`: mark a message read.

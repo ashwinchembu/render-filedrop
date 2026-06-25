@@ -276,6 +276,8 @@ function publicMessage(message) {
     body: message.body || "",
     createdAt: message.createdAt,
     project: message.project || "",
+    category: message.category || "",
+    tags: Array.isArray(message.tags) ? message.tags : [],
     relatedFileId: message.relatedFileId || "",
     relatedUrl: message.relatedUrl || "",
     readAt: message.readAt || ""
@@ -299,6 +301,8 @@ async function createMessage(body = {}) {
     body: text,
     createdAt: new Date().toISOString(),
     project: cleanText(body.project, 120),
+    category: cleanText(body.category, 80),
+    tags: Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags),
     relatedFileId: cleanText(body.relatedFileId, 80),
     relatedUrl: cleanText(body.relatedUrl, 500),
     readAt: ""
@@ -309,12 +313,15 @@ async function createMessage(body = {}) {
   return message;
 }
 
-function filterMessages(messages = [], { to, from, since, unreadOnly } = {}) {
+function filterMessages(messages = [], { to, from, since, unreadOnly, project, category, tag } = {}) {
   return messages.filter((message) => {
     if (to && !["all", to].includes(message.to || "all")) return false;
     if (from && message.from !== from) return false;
     if (since && message.createdAt <= since) return false;
     if (unreadOnly && message.readAt) return false;
+    if (project && message.project !== project) return false;
+    if (category && message.category !== category) return false;
+    if (tag && !(Array.isArray(message.tags) && message.tags.includes(tag))) return false;
     return true;
   });
 }
@@ -329,6 +336,139 @@ async function markMessageRead(id) {
   return message;
 }
 
+function channelId(value) {
+  return cleanText(value, 120)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "general";
+}
+
+function publicChannel(channel) {
+  return {
+    id: channel.id,
+    name: channel.name || channel.id,
+    description: channel.description || "",
+    category: channel.category || "",
+    tags: Array.isArray(channel.tags) ? channel.tags : [],
+    createdAt: channel.createdAt,
+    updatedAt: channel.updatedAt || channel.createdAt
+  };
+}
+
+function publicChannelMessage(message) {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    from: message.from || "",
+    body: message.body || "",
+    createdAt: message.createdAt,
+    category: message.category || "",
+    tags: Array.isArray(message.tags) ? message.tags : [],
+    relatedFileId: message.relatedFileId || "",
+    relatedUrl: message.relatedUrl || "",
+    readAt: message.readAt || ""
+  };
+}
+
+async function upsertChannel(body = {}) {
+  const meta = await readMeta();
+  meta.channels ||= [];
+  const id = channelId(body.id || body.name);
+  let channel = meta.channels.find((item) => item.id === id);
+  if (!channel) {
+    channel = {
+      id,
+      name: cleanText(body.name, 120) || id,
+      description: "",
+      category: "",
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    meta.channels.unshift(channel);
+  }
+  if (Object.hasOwn(body, "name")) channel.name = cleanText(body.name, 120) || channel.name;
+  if (Object.hasOwn(body, "description")) channel.description = cleanText(body.description, 500);
+  if (Object.hasOwn(body, "category")) channel.category = cleanText(body.category, 80);
+  if (Object.hasOwn(body, "tags")) {
+    channel.tags = Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags);
+  }
+  channel.updatedAt = new Date().toISOString();
+  await writeMeta(meta);
+  return channel;
+}
+
+async function createChannelMessage(channelValue, body = {}) {
+  const text = cleanText(body.body, 8000);
+  if (!text) {
+    const error = new Error("Missing message body");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const meta = await readMeta();
+  meta.channels ||= [];
+  meta.channelMessages ||= [];
+  const id = channelId(channelValue);
+  let channel = meta.channels.find((item) => item.id === id);
+  if (!channel) {
+    channel = {
+      id,
+      name: cleanText(body.channelName, 120) || id,
+      description: "",
+      category: cleanText(body.category, 80),
+      tags: Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    meta.channels.unshift(channel);
+  }
+  channel.updatedAt = new Date().toISOString();
+
+  const message = {
+    id: crypto.randomUUID(),
+    channelId: id,
+    from: cleanText(body.from, 80) || "unknown",
+    body: text,
+    createdAt: new Date().toISOString(),
+    category: cleanText(body.category, 80) || channel.category || "",
+    tags: Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags),
+    relatedFileId: cleanText(body.relatedFileId, 80),
+    relatedUrl: cleanText(body.relatedUrl, 500),
+    readAt: ""
+  };
+  meta.channelMessages.unshift(message);
+  await writeMeta(meta);
+  await triggerWebhooks("channel.message.created", {
+    channel: publicChannel(channel),
+    message: publicChannelMessage(message)
+  });
+  return message;
+}
+
+function filterChannelMessages(messages = [], { channelId: id, from, since, unreadOnly, category, tag } = {}) {
+  return messages.filter((message) => {
+    if (id && message.channelId !== channelId(id)) return false;
+    if (from && message.from !== from) return false;
+    if (since && message.createdAt <= since) return false;
+    if (unreadOnly && message.readAt) return false;
+    if (category && message.category !== category) return false;
+    if (tag && !(Array.isArray(message.tags) && message.tags.includes(tag))) return false;
+    return true;
+  });
+}
+
+async function markChannelMessageRead(channelValue, id) {
+  const meta = await readMeta();
+  meta.channelMessages ||= [];
+  const expectedChannelId = channelId(channelValue);
+  const message = meta.channelMessages.find((item) => item.id === id && item.channelId === expectedChannelId);
+  if (!message) return null;
+  message.readAt = new Date().toISOString();
+  await writeMeta(meta);
+  return message;
+}
+
 function publicWebhook(webhook) {
   return {
     id: webhook.id,
@@ -336,6 +476,7 @@ function publicWebhook(webhook) {
     url: webhook.url,
     event: webhook.event || "message.created",
     to: webhook.to || "",
+    channelId: webhook.channelId || "",
     createdAt: webhook.createdAt,
     hasSecret: Boolean(webhook.secret)
   };
@@ -364,6 +505,7 @@ async function createWebhook(body = {}) {
     url: url.toString(),
     event: cleanText(body.event, 80) || "message.created",
     to: cleanText(body.to, 80),
+    channelId: cleanText(body.channelId, 120) ? channelId(body.channelId) : "",
     secret: cleanText(body.secret, 200) || crypto.randomBytes(24).toString("base64url"),
     createdAt: new Date().toISOString()
   };
@@ -384,9 +526,16 @@ async function deleteWebhook(id) {
 
 function webhookMatches(webhook, event, payload) {
   if ((webhook.event || "message.created") !== event) return false;
-  if (!webhook.to) return true;
-  const messageTo = payload?.message?.to || "";
-  return messageTo === webhook.to || messageTo === "all";
+  if (event === "message.created") {
+    if (!webhook.to) return true;
+    const messageTo = payload?.message?.to || "";
+    return messageTo === webhook.to || messageTo === "all";
+  }
+  if (event === "channel.message.created") {
+    if (!webhook.channelId) return true;
+    return payload?.message?.channelId === webhook.channelId;
+  }
+  return true;
 }
 
 function signWebhook(secret, body) {
@@ -669,6 +818,88 @@ function createMcpServer(req) {
   );
 
   server.registerTool(
+    "create_channel",
+    {
+      title: "Create channel",
+      description: "Create or update a dedicated message channel, separate from the Codex control mailbox.",
+      inputSchema: {
+        id: z.string().optional().describe("Stable channel id, e.g. teams-yashodeep."),
+        name: z.string().describe("Display name, e.g. Teams/Yashodeep."),
+        description: z.string().optional(),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional()
+      }
+    },
+    async (input) => {
+      const channel = publicChannel(await upsertChannel(input));
+      return mcpTextAndStructured(`Channel ready: ${channel.id}.`, { channel });
+    }
+  );
+
+  server.registerTool(
+    "list_channels",
+    {
+      title: "List channels",
+      description: "List dedicated message channels.",
+      inputSchema: {}
+    },
+    async () => {
+      const meta = await readMeta();
+      const channels = (meta.channels || []).map(publicChannel);
+      const text = channels.length
+        ? channels.map((channel) => `${channel.id} | ${channel.name} | ${channel.category}`).join("\n")
+        : "No channels found.";
+      return mcpTextAndStructured(text, { channels });
+    }
+  );
+
+  server.registerTool(
+    "send_channel_message",
+    {
+      title: "Send channel message",
+      description: "Post a message to a dedicated channel, separate from the Codex control mailbox.",
+      inputSchema: {
+        channelId: z.string().describe("Channel id, e.g. teams-yashodeep."),
+        from: z.string().optional(),
+        body: z.string().describe("Message body."),
+        channelName: z.string().optional(),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional(),
+        relatedFileId: z.string().optional(),
+        relatedUrl: z.url().optional()
+      }
+    },
+    async ({ channelId: inputChannelId, ...body }) => {
+      const message = publicChannelMessage(await createChannelMessage(inputChannelId, body));
+      return mcpTextAndStructured(`Posted channel message ${message.id} to ${message.channelId}.`, { message });
+    }
+  );
+
+  server.registerTool(
+    "list_channel_messages",
+    {
+      title: "List channel messages",
+      description: "List messages from a dedicated channel.",
+      inputSchema: {
+        channelId: z.string().describe("Channel id."),
+        from: z.string().optional(),
+        since: z.string().optional(),
+        unreadOnly: z.boolean().optional(),
+        category: z.string().optional(),
+        tag: z.string().optional()
+      }
+    },
+    async (input) => {
+      const meta = await readMeta();
+      const messages = filterChannelMessages(meta.channelMessages || [], input).map(publicChannelMessage);
+      const text = messages.length
+        ? messages.map((message) => `${message.id} | ${message.createdAt} | ${message.from}: ${message.body}`).join("\n")
+        : "No channel messages found.";
+      return mcpTextAndStructured(text, { messages });
+    }
+  );
+
+  server.registerTool(
     "send_message",
     {
       title: "Send message",
@@ -678,6 +909,8 @@ function createMcpServer(req) {
         to: z.string().optional().describe("Recipient name, or all."),
         body: z.string().describe("Message body."),
         project: z.string().optional().describe("Optional project context."),
+        category: z.string().optional().describe("Optional message category."),
+        tags: z.union([z.string(), z.array(z.string())]).optional().describe("Optional message tags."),
         relatedFileId: z.string().optional().describe("Optional file ID this message refers to."),
         relatedUrl: z.url().optional().describe("Optional URL this message refers to.")
       }
@@ -696,6 +929,9 @@ function createMcpServer(req) {
       inputSchema: {
         to: z.string().optional().describe("Only messages to this recipient, plus all."),
         from: z.string().optional().describe("Only messages from this sender."),
+        project: z.string().optional().describe("Only messages in this project/channel."),
+        category: z.string().optional().describe("Only messages in this category."),
+        tag: z.string().optional().describe("Only messages with this tag."),
         since: z.string().optional().describe("Only messages created after this ISO timestamp."),
         unreadOnly: z.boolean().optional().describe("Only messages that have not been marked read.")
       }
@@ -734,7 +970,9 @@ function createMcpServer(req) {
       inputSchema: {
         url: z.url().describe("Public receiver URL to POST events to."),
         name: z.string().optional(),
+        event: z.enum(["message.created", "channel.message.created"]).optional(),
         to: z.string().optional().describe("Only deliver messages addressed to this mailbox name."),
+        channelId: z.string().optional().describe("Only deliver messages for this channel when event is channel.message.created."),
         secret: z.string().optional().describe("Optional HMAC signing secret. If omitted one is generated.")
       }
     },
@@ -1078,12 +1316,72 @@ app.get("/api/projects", requireConfiguredSecret(apiKey, "API_KEY"), requireApiK
   }
 });
 
+app.get("/api/channels", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (_req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ channels: (meta.channels || []).map(publicChannel) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/channels", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const channel = await upsertChannel(req.body);
+    res.status(201).json(publicChannel(channel));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/channels/:channelId/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const messages = filterChannelMessages(meta.channelMessages || [], {
+      channelId: req.params.channelId,
+      from: cleanText(req.query.from, 80),
+      since: cleanText(req.query.since, 80),
+      unreadOnly: req.query.unreadOnly === "true",
+      category: cleanText(req.query.category, 80),
+      tag: cleanText(req.query.tag, 40)
+    }).map(publicChannelMessage);
+    res.json({ messages });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/channels/:channelId/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const message = await createChannelMessage(req.params.channelId, req.body);
+    res.status(201).json(publicChannelMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/channels/:channelId/messages/:id/read", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const message = await markChannelMessageRead(req.params.channelId, req.params.id);
+    if (!message) {
+      res.status(404).json({ error: "Channel message not found" });
+      return;
+    }
+    res.json(publicChannelMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
     const meta = await readMeta();
     const messages = filterMessages(meta.messages || [], {
       to: cleanText(req.query.to, 80),
       from: cleanText(req.query.from, 80),
+      project: cleanText(req.query.project, 120),
+      category: cleanText(req.query.category, 80),
+      tag: cleanText(req.query.tag, 40),
       since: cleanText(req.query.since, 80),
       unreadOnly: req.query.unreadOnly === "true"
     }).map(publicMessage);
@@ -1154,19 +1452,39 @@ app.post("/api/webhooks/:id/test", requireConfiguredSecret(apiKey, "API_KEY"), r
       res.status(404).json({ error: "Webhook not found" });
       return;
     }
-    await deliverWebhook(webhook, "message.created", {
-      message: {
-        id: "test",
-        from: "filedrop",
-        to: webhook.to || "all",
-        body: "Test webhook delivery",
-        createdAt: new Date().toISOString(),
-        project: "Comms",
-        relatedFileId: "",
-        relatedUrl: "",
-        readAt: ""
-      }
-    });
+    if ((webhook.event || "message.created") === "channel.message.created") {
+      await deliverWebhook(webhook, "channel.message.created", {
+        channel: { id: webhook.channelId || "test", name: webhook.channelId || "test" },
+        message: {
+          id: "test",
+          channelId: webhook.channelId || "test",
+          from: "filedrop",
+          body: "Test channel webhook delivery",
+          createdAt: new Date().toISOString(),
+          category: "test",
+          tags: ["test"],
+          relatedFileId: "",
+          relatedUrl: "",
+          readAt: ""
+        }
+      });
+    } else {
+      await deliverWebhook(webhook, "message.created", {
+        message: {
+          id: "test",
+          from: "filedrop",
+          to: webhook.to || "all",
+          body: "Test webhook delivery",
+          createdAt: new Date().toISOString(),
+          project: "Comms",
+          category: "test",
+          tags: ["test"],
+          relatedFileId: "",
+          relatedUrl: "",
+          readAt: ""
+        }
+      });
+    }
     res.json({ ok: true });
   } catch (error) {
     next(error);

@@ -165,6 +165,139 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageRecord"
+  /api/channels:
+    get:
+      operationId: listChannels
+      summary: List dedicated conversation channels.
+      responses:
+        "200":
+          description: Channels.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channels:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChannelRecord"
+    post:
+      operationId: createChannel
+      summary: Create or update a dedicated conversation channel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                category:
+                  type: string
+                tags:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+      responses:
+        "201":
+          description: Channel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelRecord"
+  /api/channels/{channelId}/messages:
+    get:
+      operationId: listChannelMessages
+      summary: List messages in a dedicated conversation channel.
+      parameters:
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Channel messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChannelMessageRecord"
+    post:
+      operationId: sendChannelMessage
+      summary: Post a message to a dedicated conversation channel.
+      parameters:
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                from:
+                  type: string
+                body:
+                  type: string
+                category:
+                  type: string
+                tags:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                relatedFileId:
+                  type: string
+                relatedUrl:
+                  type: string
+                  format: uri
+      responses:
+        "201":
+          description: Channel message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelMessageRecord"
   /api/webhooks:
     get:
       operationId: listWebhooks
@@ -201,6 +334,14 @@ paths:
                 to:
                   type: string
                   description: Only deliver messages addressed to this name.
+                event:
+                  type: string
+                  enum:
+                    - message.created
+                    - channel.message.created
+                channelId:
+                  type: string
+                  description: Only deliver events for this channel when event is channel.message.created.
                 secret:
                   type: string
                   description: Optional HMAC signing secret.
@@ -423,6 +564,51 @@ components:
           format: uri
         readAt:
           type: string
+    ChannelRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+    ChannelMessageRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        channelId:
+          type: string
+        from:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        relatedFileId:
+          type: string
+        relatedUrl:
+          type: string
+          format: uri
+        readAt:
+          type: string
     WebhookRecord:
       type: object
       properties:
@@ -436,6 +622,8 @@ components:
         event:
           type: string
         to:
+          type: string
+        channelId:
           type: string
         createdAt:
           type: string
