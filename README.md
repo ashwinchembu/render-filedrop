@@ -7,6 +7,7 @@ A tiny Render-hosted file bridge for moving files between computers.
 - Password-protected browser upload page.
 - File library grouped by day, month, or category.
 - Category, tag, and note fields for organizing files.
+- GitHub-lite project, path, version history, and commit-message fields.
 - Unguessable public download links for individual files.
 - API-key-protected upload, list, and download endpoints.
 - MCP server endpoint for connecting as a ChatGPT custom app.
@@ -72,9 +73,23 @@ Update organization metadata:
 ```sh
 curl -X PATCH -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"category":"Receipts","tags":"tax, 2026","note":"Uploaded from laptop"}' \
+  -d '{"project":"Taxes","path":"2026/w2.pdf","category":"Receipts","tags":"tax, 2026","commitMessage":"Add W2","note":"Uploaded from laptop"}' \
   "$BASE_URL/api/files/<file-id>"
 ```
+
+Create a new version of an existing file:
+
+```sh
+curl -H "Authorization: Bearer $API_KEY" \
+  -F "file=@/path/to/document-v2.pdf" \
+  -F "commitMessage=Update signed copy" \
+  "$BASE_URL/api/files/<file-id>/versions"
+```
+
+Project and history endpoints:
+
+- `GET /api/projects`: list project buckets with current file and version counts.
+- `GET /api/files/<file-id>/history`: list the version chain for a file.
 
 ## Connecting an API Client
 
@@ -108,15 +123,18 @@ Configure the MCP/custom app authentication as a Bearer token and use the same `
 Available MCP tools:
 
 - `list_files`: find stored files and group them by day, month, or category.
+- `list_projects`: list project buckets and version counts.
 - `import_chatgpt_files`: save files attached in ChatGPT into the filedrop.
 - `upload_from_url`: pull a downloadable URL into the filedrop.
+- `upload_new_version_from_url`: save a URL as the next version of a stored file.
 - `organize_file`: update category, tags, and note.
+- `get_file_history`: inspect a file's version chain.
 - `get_file_link`: get the direct download link for a stored file.
 
 Suggested ChatGPT instructions:
 
 ```text
-Use my Private Filedrop MCP tools to move files between computers. Save attached files with import_chatgpt_files, list stored files with list_files, organize files with organize_file, and give me direct links with get_file_link. Prefer categories like Work, Receipts, Personal, or Transfers when I do not specify one.
+Use my Private Filedrop MCP tools to move files between computers. Treat projects and paths like lightweight repos. Save attached files with import_chatgpt_files, list stored files with list_files, organize files with organize_file, upload follow-up versions with upload_new_version_from_url when I am replacing a file, inspect history with get_file_history, and give me direct links with get_file_link. Prefer categories like Work, Receipts, Personal, or Transfers when I do not specify one.
 ```
 
 ## Local Run

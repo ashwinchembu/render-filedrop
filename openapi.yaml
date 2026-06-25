@@ -50,13 +50,35 @@ paths:
                   format: binary
                 name:
                   type: string
+                project:
+                  type: string
+                path:
+                  type: string
+                commitMessage:
+                  type: string
       responses:
         "201":
           description: Uploaded file metadata.
           content:
             application/json:
+                  schema:
+                    $ref: "#/components/schemas/FileRecord"
+  /api/projects:
+    get:
+      operationId: listProjects
+      summary: List project buckets.
+      responses:
+        "200":
+          description: Project summaries.
+          content:
+            application/json:
               schema:
-                $ref: "#/components/schemas/FileRecord"
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectRecord"
   /api/files/{id}/download:
     get:
       operationId: downloadFile
@@ -70,6 +92,59 @@ paths:
       responses:
         "200":
           description: File bytes.
+  /api/files/{id}/history:
+    get:
+      operationId: getFileHistory
+      summary: List the version history for an uploaded file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Version chain.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileRecord"
+  /api/files/{id}/versions:
+    post:
+      operationId: uploadFileVersion
+      summary: Upload a new version for an existing file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                commitMessage:
+                  type: string
+      responses:
+        "201":
+          description: Uploaded file version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileRecord"
           content:
             application/octet-stream:
               schema:
@@ -101,6 +176,12 @@ paths:
                       items:
                         type: string
                 note:
+                  type: string
+                project:
+                  type: string
+                path:
+                  type: string
+                commitMessage:
                   type: string
       responses:
         "200":
@@ -137,6 +218,27 @@ components:
             type: string
         note:
           type: string
+        project:
+          type: string
+        path:
+          type: string
+        version:
+          type: integer
+        parentId:
+          type: string
+        commitMessage:
+          type: string
         downloadUrl:
           type: string
           format: uri
+    ProjectRecord:
+      type: object
+      properties:
+        name:
+          type: string
+        files:
+          type: integer
+        versions:
+          type: integer
+        latestUpload:
+          type: string

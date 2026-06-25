@@ -36,13 +36,19 @@ function groupKey(file) {
   if (groupByInput.value === "category") {
     return file.category || "Uncategorized";
   }
+  if (groupByInput.value === "project") {
+    return file.project || "Unprojected";
+  }
   return new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(date);
 }
 
 function fileMatches(file) {
   const query = searchInput.value.trim().toLowerCase();
   if (!query) return true;
-  return [file.name, file.category, file.note, ...(file.tags || [])].join(" ").toLowerCase().includes(query);
+  return [file.name, file.category, file.note, file.project, file.path, file.commitMessage, ...(file.tags || [])]
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
 }
 
 function escapeHtml(value) {
@@ -77,18 +83,35 @@ function renderFiles() {
             <article class="file-row" data-id="${file.id}">
               <div class="file-main">
                 <a href="${file.downloadUrl}" class="file-name">${escapeHtml(file.name)}</a>
-                <div class="meta">${formatDate(file.uploadedAt)} · ${formatSize(file.size)}</div>
+                <div class="meta">v${file.version || 1} · ${formatDate(file.uploadedAt)} · ${formatSize(file.size)}</div>
                 <div class="chips">
-                  ${(file.category ? [file.category] : []).concat(file.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+                  ${(file.project ? [`Project: ${file.project}`] : [])
+                    .concat(file.path ? [`Path: ${file.path}`] : [])
+                    .concat(file.category ? [file.category] : [])
+                    .concat(file.tags || [])
+                    .map((tag) => `<span>${escapeHtml(tag)}</span>`)
+                    .join("")}
                 </div>
+                ${file.commitMessage ? `<p class="commit">${escapeHtml(file.commitMessage)}</p>` : ""}
                 ${file.note ? `<p class="note">${escapeHtml(file.note)}</p>` : ""}
+                <div class="row-actions">
+                  <button class="secondary history-button" type="button" data-id="${file.id}">History</button>
+                  <label class="version-upload">
+                    New version
+                    <input type="file" data-version-file="${file.id}" />
+                  </label>
+                </div>
               </div>
               <form class="organize-form">
                 <input name="category" value="${escapeHtml(file.category)}" placeholder="Category" />
+                <input name="project" value="${escapeHtml(file.project)}" placeholder="Project" />
+                <input name="path" value="${escapeHtml(file.path)}" placeholder="Path" />
                 <input name="tags" value="${escapeHtml((file.tags || []).join(", "))}" placeholder="Tags" />
+                <input name="commitMessage" value="${escapeHtml(file.commitMessage)}" placeholder="Commit message" />
                 <input name="note" value="${escapeHtml(file.note)}" placeholder="Note" />
                 <button type="submit">Save</button>
               </form>
+              <div class="history" hidden></div>
             </article>`
         )
         .join("");
@@ -121,7 +144,10 @@ form.addEventListener("submit", async (event) => {
   const body = new FormData();
   body.append("file", file);
   body.append("category", document.querySelector("#category").value);
+  body.append("project", document.querySelector("#project").value);
+  body.append("path", document.querySelector("#path").value);
   body.append("tags", document.querySelector("#tags").value);
+  body.append("commitMessage", document.querySelector("#commitMessage").value);
   body.append("note", document.querySelector("#note").value);
 
   setStatus("Uploading...");
@@ -168,6 +194,58 @@ filesBox.addEventListener("submit", async (event) => {
   files = files.map((file) => (file.id === result.id ? result : file));
   setStatus("Saved.", "success");
   renderFiles();
+});
+
+filesBox.addEventListener("click", async (event) => {
+  const button = event.target.closest(".history-button");
+  if (!button) return;
+  const row = button.closest(".file-row");
+  const panel = row.querySelector(".history");
+  if (!panel.hidden) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  const response = await fetch(`/web/files/${button.dataset.id}/history`, {
+    headers: { "x-upload-password": password() }
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    setStatus(result.error || "Could not load history", "error");
+    return;
+  }
+  panel.hidden = false;
+  panel.innerHTML = result.files
+    .map(
+      (file) => `
+        <a href="${file.downloadUrl}">v${file.version || 1}</a>
+        <span>${escapeHtml(file.commitMessage || file.name)}</span>
+        <small>${formatDate(file.uploadedAt)}</small>`
+    )
+    .join("");
+});
+
+filesBox.addEventListener("change", async (event) => {
+  const input = event.target.closest("input[data-version-file]");
+  if (!input || !input.files.length) return;
+  const file = input.files[0];
+  const body = new FormData();
+  body.append("file", file);
+  body.append("commitMessage", `Updated ${file.name}`);
+  setStatus("Uploading new version...");
+  const response = await fetch(`/web/files/${input.dataset.versionFile}/versions`, {
+    method: "POST",
+    headers: { "x-upload-password": password() },
+    body
+  });
+  const result = await response.json();
+  input.value = "";
+  if (!response.ok) {
+    setStatus(result.error || "Could not upload new version", "error");
+    return;
+  }
+  setStatus(`Uploaded v${result.version}: <a href="${result.downloadUrl}">${escapeHtml(result.name)}</a>`, "success");
+  await loadFiles();
 });
 
 statusBox.addEventListener("click", async (event) => {

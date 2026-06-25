@@ -36,6 +36,15 @@ paths:
                 note:
                   type: string
                   description: Optional note about the upload.
+                project:
+                  type: string
+                  description: Optional project or repo-like bucket.
+                path:
+                  type: string
+                  description: Optional file path inside the project.
+                commitMessage:
+                  type: string
+                  description: Optional version history message.
       responses:
         "201":
           description: Imported files with filedrop download links.
@@ -87,6 +96,12 @@ paths:
                   type: string
                 note:
                   type: string
+                project:
+                  type: string
+                path:
+                  type: string
+                commitMessage:
+                  type: string
       responses:
         "200":
           description: Updated file.
@@ -117,6 +132,44 @@ paths:
                     items:
                       type: string
                       format: uri
+  /api/projects:
+    get:
+      operationId: listProjects
+      summary: List project buckets with current file and version counts.
+      responses:
+        "200":
+          description: Stored projects.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectRecord"
+  /api/files/{id}/history:
+    get:
+      operationId: getFileHistory
+      summary: Return the version chain for a stored file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Version history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileRecord"
 components:
   securitySchemes:
     bearerAuth:
@@ -144,6 +197,27 @@ components:
             type: string
         note:
           type: string
+        project:
+          type: string
+        path:
+          type: string
+        version:
+          type: integer
+        parentId:
+          type: string
+        commitMessage:
+          type: string
         downloadUrl:
           type: string
           format: uri
+    ProjectRecord:
+      type: object
+      properties:
+        name:
+          type: string
+        files:
+          type: integer
+        versions:
+          type: integer
+        latestUpload:
+          type: string

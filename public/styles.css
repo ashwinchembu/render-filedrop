@@ -245,12 +245,56 @@ button:hover {
   line-height: 1.45;
 }
 
+.commit {
+  margin-top: 9px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.secondary {
+  padding: 7px 10px;
+  color: #111827;
+  background: #e5e7eb;
+  font-size: 13px;
+}
+
+.secondary:hover {
+  background: #d7dde6;
+}
+
+.version-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.version-upload input {
+  max-width: 220px;
+  padding: 6px;
+  font-size: 12px;
+}
+
 .organize-form {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 0;
 }
 
+.organize-form input[name="path"],
+.organize-form input[name="commitMessage"],
 .organize-form input[name="note"] {
   grid-column: 1 / -1;
 }
@@ -259,6 +303,33 @@ button:hover {
   justify-self: end;
   grid-column: 1 / -1;
   padding: 8px 12px;
+}
+
+.history {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #344054;
+  font-size: 13px;
+}
+
+.history[hidden] {
+  display: none;
+}
+
+.history a {
+  color: #1d4ed8;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.history small {
+  color: #667085;
 }
 
 @media (max-width: 860px) {
@@ -277,6 +348,11 @@ button:hover {
   }
 
   .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .history,
+  .organize-form {
     grid-template-columns: 1fr;
   }
 }

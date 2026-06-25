@@ -209,15 +209,63 @@ function publicFile(file, req) {
     category: file.category || "",
     tags: Array.isArray(file.tags) ? file.tags : [],
     note: file.note || "",
+    project: file.project || "",
+    path: file.path || "",
+    version: file.version || 1,
+    parentId: file.parentId || "",
+    commitMessage: file.commitMessage || "",
     downloadUrl: `${req.protocol}://${req.get("host")}/d/${file.downloadToken}`
   };
 }
 
 function applyFileMetadata(record, body = {}) {
-  record.category = cleanText(body.category, 80);
-  record.tags = Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags);
-  record.note = cleanText(body.note, 500);
+  if (Object.hasOwn(body, "category")) record.category = cleanText(body.category, 80);
+  if (Object.hasOwn(body, "tags")) {
+    record.tags = Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags);
+  }
+  if (Object.hasOwn(body, "note")) record.note = cleanText(body.note, 500);
+  if (Object.hasOwn(body, "project")) record.project = cleanText(body.project, 120);
+  if (Object.hasOwn(body, "path")) record.path = cleanText(body.path, 300).replace(/^\/+/, "");
+  if (Object.hasOwn(body, "commitMessage")) record.commitMessage = cleanText(body.commitMessage, 500);
   return record;
+}
+
+function lineageFor(files, id) {
+  const byId = new Map(files.map((file) => [file.id, file]));
+  const chain = [];
+  let current = byId.get(id);
+  while (current) {
+    chain.push(current);
+    current = current.parentId ? byId.get(current.parentId) : null;
+  }
+  return chain.reverse();
+}
+
+function latestFiles(files) {
+  const parentIds = new Set(files.map((file) => file.parentId).filter(Boolean));
+  return files.filter((file) => !parentIds.has(file.id));
+}
+
+function projectSummary(files) {
+  const projects = new Map();
+  for (const file of files) {
+    const name = file.project || "Unprojected";
+    const entry = projects.get(name) || {
+      name,
+      files: 0,
+      versions: 0,
+      latestUpload: ""
+    };
+    entry.versions += 1;
+    if (!files.some((candidate) => candidate.parentId === file.id)) entry.files += 1;
+    if (!entry.latestUpload || file.uploadedAt > entry.latestUpload) entry.latestUpload = file.uploadedAt;
+    projects.set(name, entry);
+  }
+  return Array.from(projects.values()).sort((a, b) => (b.latestUpload || "").localeCompare(a.latestUpload || ""));
+}
+
+function definedMetadata(input = {}) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 }
 
 async function saveUploadedFile(file, body = {}) {
@@ -229,6 +277,12 @@ async function saveUploadedFile(file, body = {}) {
 
   const meta = await readMeta();
   const safeExt = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, "");
+  const parent = body.parentId ? meta.files.find((item) => item.id === body.parentId) : null;
+  if (body.parentId && !parent) {
+    const error = new Error("Parent file not found");
+    error.statusCode = 404;
+    throw error;
+  }
   const record = {
     id: crypto.randomUUID(),
     storageName: `${crypto.randomUUID()}${safeExt}`,
@@ -236,8 +290,22 @@ async function saveUploadedFile(file, body = {}) {
     mimeType: file.mimetype || "application/octet-stream",
     size: file.size,
     uploadedAt: new Date().toISOString(),
-    downloadToken: crypto.randomBytes(24).toString("base64url")
+    downloadToken: crypto.randomBytes(24).toString("base64url"),
+    parentId: parent?.id || "",
+    version: parent ? Math.max(...lineageFor(meta.files, parent.id).map((item) => item.version || 1)) + 1 : 1,
+    category: "",
+    tags: [],
+    note: "",
+    project: "",
+    path: "",
+    commitMessage: ""
   };
+  if (parent) {
+    record.project = parent.project || "";
+    record.path = parent.path || "";
+    record.category = parent.category || "";
+    record.tags = Array.isArray(parent.tags) ? parent.tags : [];
+  }
   applyFileMetadata(record, body);
   await writeFileObject(record.storageName, file);
   meta.files.unshift(record);
@@ -275,6 +343,9 @@ function filterFiles(files, query) {
       file.originalName,
       file.category,
       file.note,
+      file.project,
+      file.path,
+      file.commitMessage,
       ...(Array.isArray(file.tags) ? file.tags : [])
     ]
       .filter(Boolean)
@@ -292,6 +363,7 @@ function groupFiles(files, groupBy) {
     let key = file.category || "Uncategorized";
     if (groupBy === "day") key = Number.isNaN(date.valueOf()) ? "Unknown date" : date.toISOString().slice(0, 10);
     if (groupBy === "month") key = Number.isNaN(date.valueOf()) ? "Unknown month" : date.toISOString().slice(0, 7);
+    if (groupBy === "project") key = file.project || "Unprojected";
     groups[key] ||= [];
     groups[key].push(file.id);
     return groups;
@@ -359,6 +431,29 @@ async function saveUrlFile({ url, name, category, tags, note }, req) {
   return publicFile(record, req);
 }
 
+async function saveUrlFileWithMetadata({ url, name, category, tags, note, project, path: filePath, commitMessage, parentId }, req) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const error = new Error(`Could not fetch URL: ${response.status}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const parsedUrl = new URL(url);
+  const fallbackName = path.basename(parsedUrl.pathname) || "download";
+  const record = await saveBufferFile(
+    {
+      buffer: bytes,
+      originalname: cleanText(name, 240) || decodeURIComponent(fallbackName),
+      mimetype: response.headers.get("content-type") || "application/octet-stream",
+      size: bytes.length
+    },
+    definedMetadata({ category, tags, note, project, path: filePath, commitMessage, parentId })
+  );
+  return publicFile(record, req);
+}
+
 function createMcpServer(req) {
   const server = new McpServer({
     name: "private-filedrop",
@@ -373,21 +468,41 @@ function createMcpServer(req) {
       description: "List stored files, optionally filtered and grouped by day, month, or category.",
       inputSchema: {
         query: z.string().optional().describe("Optional search text for filename, category, tags, or notes."),
-        groupBy: z.enum(["none", "day", "month", "category"]).optional().describe("How to group the returned files.")
+        groupBy: z.enum(["none", "day", "month", "category", "project"]).optional().describe("How to group the returned files."),
+        latestOnly: z.boolean().optional().describe("Return only the newest version in each version chain.")
       }
     },
-    async ({ query, groupBy = "day" }) => {
+    async ({ query, groupBy = "day", latestOnly = false }) => {
       const meta = await readMeta();
-      const files = filterFiles(meta.files, query).map((file) => publicFile(file, publicReq));
+      const sourceFiles = latestOnly ? latestFiles(meta.files) : meta.files;
+      const files = filterFiles(sourceFiles, query).map((file) => publicFile(file, publicReq));
       const groups = groupFiles(files.map((file) => ({
         id: file.id,
         category: file.category,
+        project: file.project,
         uploadedAt: file.uploadedAt
       })), groupBy);
       const summary = files.length
-        ? files.map((file) => `${file.id} | ${file.uploadedAt.slice(0, 10)} | ${file.name}`).join("\n")
+        ? files.map((file) => `${file.id} | v${file.version} | ${file.project || "Unprojected"} | ${file.path || file.name}`).join("\n")
         : "No files found.";
       return mcpTextAndStructured(summary, { files, groups });
+    }
+  );
+
+  server.registerTool(
+    "list_projects",
+    {
+      title: "List projects",
+      description: "List GitHub-like project buckets with file and version counts.",
+      inputSchema: {}
+    },
+    async () => {
+      const meta = await readMeta();
+      const projects = projectSummary(meta.files);
+      const text = projects.length
+        ? projects.map((project) => `${project.name} | ${project.files} current file(s), ${project.versions} version(s)`).join("\n")
+        : "No projects found.";
+      return mcpTextAndStructured(text, { projects });
     }
   );
 
@@ -419,12 +534,38 @@ function createMcpServer(req) {
         name: z.string().optional().describe("Optional stored filename."),
         category: z.string().optional(),
         tags: z.union([z.string(), z.array(z.string())]).optional(),
-        note: z.string().optional()
+        note: z.string().optional(),
+        project: z.string().optional(),
+        path: z.string().optional(),
+        commitMessage: z.string().optional()
       }
     },
     async (input) => {
-      const file = await saveUrlFile(input, publicReq);
+      const file = await saveUrlFileWithMetadata(input, publicReq);
       return mcpTextAndStructured(`Uploaded ${file.name}.`, { file });
+    }
+  );
+
+  server.registerTool(
+    "upload_new_version_from_url",
+    {
+      title: "Upload new version from URL",
+      description: "Fetch a URL and save it as the next version of an existing file.",
+      inputSchema: {
+        parentId: z.string().describe("Existing file ID to version from."),
+        url: z.url().describe("A downloadable URL."),
+        name: z.string().optional().describe("Optional stored filename."),
+        category: z.string().optional(),
+        tags: z.union([z.string(), z.array(z.string())]).optional(),
+        note: z.string().optional(),
+        project: z.string().optional(),
+        path: z.string().optional(),
+        commitMessage: z.string().optional()
+      }
+    },
+    async (input) => {
+      const file = await saveUrlFileWithMetadata(input, publicReq);
+      return mcpTextAndStructured(`Uploaded ${file.name} v${file.version}.`, { file });
     }
   );
 
@@ -437,14 +578,35 @@ function createMcpServer(req) {
         id: z.string().describe("File ID from list_files."),
         category: z.string().optional(),
         tags: z.union([z.string(), z.array(z.string())]).optional(),
-        note: z.string().optional()
+        note: z.string().optional(),
+        project: z.string().optional(),
+        path: z.string().optional(),
+        commitMessage: z.string().optional()
       }
     },
-    async ({ id, category, tags, note }) => {
-      const file = await updateFileMetadata(id, { category, tags, note });
+    async ({ id, category, tags, note, project, path: filePath, commitMessage }) => {
+      const file = await updateFileMetadata(id, { category, tags, note, project, path: filePath, commitMessage });
       if (!file) throw new Error("File not found");
       const publicRecord = publicFile(file, publicReq);
       return mcpTextAndStructured(`Updated ${publicRecord.name}.`, { file: publicRecord });
+    }
+  );
+
+  server.registerTool(
+    "get_file_history",
+    {
+      title: "Get file history",
+      description: "Return the version chain for a stored file.",
+      inputSchema: {
+        id: z.string().describe("Any file ID in the version chain.")
+      }
+    },
+    async ({ id }) => {
+      const meta = await readMeta();
+      const history = lineageFor(meta.files, id).map((file) => publicFile(file, publicReq));
+      if (!history.length) throw new Error("File not found");
+      const text = history.map((file) => `v${file.version} | ${file.uploadedAt} | ${file.commitMessage || file.name}`).join("\n");
+      return mcpTextAndStructured(text, { files: history });
     }
   );
 
@@ -558,6 +720,25 @@ app.post(
   }
 );
 
+app.post(
+  "/api/files/:id/versions",
+  requireConfiguredSecret(apiKey, "API_KEY"),
+  requireApiKey,
+  upload.single("file"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "Missing file field" });
+        return;
+      }
+      const record = await saveUploadedFile(req.file, { ...req.body, parentId: req.params.id });
+      res.status(201).json(publicFile(record, req));
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.post("/api/chatgpt/import", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
     const imported = await importChatGptRefs(req.body?.openaiFileIdRefs, req.body, req);
@@ -586,10 +767,53 @@ app.post(
   }
 );
 
+app.post(
+  "/web/files/:id/versions",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  upload.single("file"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "Missing file field" });
+        return;
+      }
+      const record = await saveUploadedFile(req.file, { ...req.body, parentId: req.params.id });
+      res.status(201).json(publicFile(record, req));
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.get("/api/files", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
     const meta = await readMeta();
-    res.json({ files: meta.files.map((file) => publicFile(file, req)) });
+    const sourceFiles = req.query.latest === "true" ? latestFiles(meta.files) : meta.files;
+    res.json({ files: sourceFiles.map((file) => publicFile(file, req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/projects", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ projects: projectSummary(meta.files) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/files/:id/history", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const history = lineageFor(meta.files, req.params.id);
+    if (!history.length) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json({ files: history.map((file) => publicFile(file, req)) });
   } catch (error) {
     next(error);
   }
@@ -611,7 +835,31 @@ app.patch("/api/files/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireA
 app.get("/web/files", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
   try {
     const meta = await readMeta();
-    res.json({ files: meta.files.map((file) => publicFile(file, req)) });
+    const sourceFiles = req.query.latest === "true" ? latestFiles(meta.files) : meta.files;
+    res.json({ files: sourceFiles.map((file) => publicFile(file, req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/web/projects", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ projects: projectSummary(meta.files) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/web/files/:id/history", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const history = lineageFor(meta.files, req.params.id);
+    if (!history.length) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json({ files: history.map((file) => publicFile(file, req)) });
   } catch (error) {
     next(error);
   }

@@ -32,8 +32,20 @@
               <input id="category" name="category" type="text" placeholder="Work, lease, receipts" />
             </label>
             <label>
+              Project
+              <input id="project" name="project" type="text" placeholder="Client docs, taxes, laptop transfer" />
+            </label>
+            <label>
+              Path
+              <input id="path" name="path" type="text" placeholder="contracts/vendor-agreement.pdf" />
+            </label>
+            <label>
               Tags
               <input id="tags" name="tags" type="text" placeholder="tax, signed, urgent" />
+            </label>
+            <label>
+              Commit message
+              <input id="commitMessage" name="commitMessage" type="text" placeholder="Initial upload" />
             </label>
             <label>
               Note
@@ -56,6 +68,7 @@
                 <option value="day">Group by day</option>
                 <option value="month">Group by month</option>
                 <option value="category">Group by category</option>
+                <option value="project">Group by project</option>
               </select>
               <button id="refresh" type="button">Refresh</button>
             </div>
