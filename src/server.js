@@ -70,6 +70,18 @@ function storageConfigured() {
   return storageDriver === "local" || Boolean(s3 && s3Bucket);
 }
 
+function cleanText(value, maxLength = 200) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function cleanTags(value) {
+  return String(value || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 async function readMeta() {
   if (storageDriver === "s3") {
     if (!s3Bucket) return { files: [] };
@@ -178,11 +190,21 @@ function publicFile(file, req) {
     size: file.size,
     mimeType: file.mimeType,
     uploadedAt: file.uploadedAt,
+    category: file.category || "",
+    tags: Array.isArray(file.tags) ? file.tags : [],
+    note: file.note || "",
     downloadUrl: `${req.protocol}://${req.get("host")}/d/${file.downloadToken}`
   };
 }
 
-async function saveUploadedFile(file, label) {
+function applyFileMetadata(record, body = {}) {
+  record.category = cleanText(body.category, 80);
+  record.tags = Array.isArray(body.tags) ? body.tags.map((tag) => cleanText(tag, 40)).filter(Boolean) : cleanTags(body.tags);
+  record.note = cleanText(body.note, 500);
+  return record;
+}
+
+async function saveUploadedFile(file, body = {}) {
   if (!storageConfigured()) {
     const error = new Error("Storage is not configured");
     error.statusCode = 503;
@@ -194,16 +216,26 @@ async function saveUploadedFile(file, label) {
   const record = {
     id: crypto.randomUUID(),
     storageName: `${crypto.randomUUID()}${safeExt}`,
-    originalName: label || file.originalname,
+    originalName: cleanText(body.name, 240) || file.originalname,
     mimeType: file.mimetype || "application/octet-stream",
     size: file.size,
     uploadedAt: new Date().toISOString(),
     downloadToken: crypto.randomBytes(24).toString("base64url")
   };
+  applyFileMetadata(record, body);
   await writeFileObject(record.storageName, file);
   meta.files.unshift(record);
   await writeMeta(meta);
   return record;
+}
+
+async function updateFileMetadata(id, body) {
+  const meta = await readMeta();
+  const file = meta.files.find((item) => item.id === id);
+  if (!file) return null;
+  applyFileMetadata(file, body);
+  await writeMeta(meta);
+  return file;
 }
 
 app.get("/healthz", (_req, res) => {
@@ -221,7 +253,7 @@ app.post(
         res.status(400).json({ error: "Missing file field" });
         return;
       }
-      const record = await saveUploadedFile(req.file, req.body?.name);
+      const record = await saveUploadedFile(req.file, req.body);
       res.status(201).json(publicFile(record, req));
     } catch (error) {
       next(error);
@@ -240,7 +272,7 @@ app.post(
         res.status(400).json({ error: "Missing file field" });
         return;
       }
-      const record = await saveUploadedFile(req.file, req.body?.name);
+      const record = await saveUploadedFile(req.file, req.body);
       res.status(201).json(publicFile(record, req));
     } catch (error) {
       next(error);
@@ -252,6 +284,41 @@ app.get("/api/files", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey,
   try {
     const meta = await readMeta();
     res.json({ files: meta.files.map((file) => publicFile(file, req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/files/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const file = await updateFileMetadata(req.params.id, req.body);
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json(publicFile(file, req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/web/files", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ files: meta.files.map((file) => publicFile(file, req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/web/files/:id", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const file = await updateFileMetadata(req.params.id, req.body);
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    res.json(publicFile(file, req));
   } catch (error) {
     next(error);
   }

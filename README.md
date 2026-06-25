@@ -5,6 +5,8 @@ A tiny Render-hosted file bridge for moving files between computers.
 ## Features
 
 - Password-protected browser upload page.
+- File library grouped by day, month, or category.
+- Category, tag, and note fields for organizing files.
 - Unguessable public download links for individual files.
 - API-key-protected upload, list, and download endpoints.
 - S3 or S3-compatible storage support through `render.yaml`.
@@ -63,6 +65,15 @@ curl -L -H "Authorization: Bearer $API_KEY" \
 ```
 
 Download links returned by upload/list can be opened directly in a browser.
+
+Update organization metadata:
+
+```sh
+curl -X PATCH -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"Receipts","tags":"tax, 2026","note":"Uploaded from laptop"}' \
+  "$BASE_URL/api/files/<file-id>"
+```
 
 ## Connecting an API Client
 

@@ -8,26 +8,60 @@
   </head>
   <body>
     <main class="shell">
-      <section class="panel">
+      <section class="toolbar">
         <div>
           <p class="eyebrow">Private file bridge</p>
-          <h1>Upload here. Download anywhere.</h1>
-          <p class="lede">Use the shared password to create a download link for your other computer or for API access.</p>
+          <h1>Files</h1>
         </div>
+        <label class="password">
+          Password
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+        </label>
+      </section>
 
-        <form id="uploadForm">
-          <label>
-            Password
-            <input id="password" name="password" type="password" autocomplete="current-password" required />
-          </label>
-          <label>
-            File
-            <input id="file" name="file" type="file" required />
-          </label>
-          <button type="submit">Upload file</button>
-        </form>
+      <section class="workspace">
+        <aside class="upload-panel">
+          <h2>Upload</h2>
+          <form id="uploadForm">
+            <label>
+              File
+              <input id="file" name="file" type="file" required />
+            </label>
+            <label>
+              Category
+              <input id="category" name="category" type="text" placeholder="Work, lease, receipts" />
+            </label>
+            <label>
+              Tags
+              <input id="tags" name="tags" type="text" placeholder="tax, signed, urgent" />
+            </label>
+            <label>
+              Note
+              <textarea id="note" name="note" rows="3" placeholder="Quick reminder"></textarea>
+            </label>
+            <button type="submit">Upload</button>
+          </form>
+          <div id="status" class="status" role="status"></div>
+        </aside>
 
-        <div id="status" class="status" role="status"></div>
+        <section class="files-panel">
+          <div class="files-header">
+            <div>
+              <h2>Library</h2>
+              <p id="summary">Enter the password to load files.</p>
+            </div>
+            <div class="filters">
+              <input id="search" type="search" placeholder="Search files" />
+              <select id="groupBy">
+                <option value="day">Group by day</option>
+                <option value="month">Group by month</option>
+                <option value="category">Group by category</option>
+              </select>
+              <button id="refresh" type="button">Refresh</button>
+            </div>
+          </div>
+          <div id="files" class="files-empty">No files loaded.</div>
+        </section>
       </section>
     </main>
     <script src="/script.js"></script>

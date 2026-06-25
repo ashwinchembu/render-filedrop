@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f5f7fa;
-  color: #111827;
+  background: #f6f7f9;
+  color: #121826;
 }
 
 * {
@@ -15,70 +15,117 @@ body {
 
 .shell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 32px 16px;
+  padding: 24px;
 }
 
-.panel {
-  width: min(100%, 560px);
-  background: #ffffff;
-  border: 1px solid #dde3ea;
-  border-radius: 8px;
-  padding: 32px;
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.09);
+.toolbar,
+.workspace {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 0 22px;
 }
 
 .eyebrow {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: #2563eb;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 760;
   letter-spacing: 0;
   text-transform: uppercase;
 }
 
-h1 {
+h1,
+h2,
+h3,
+p {
   margin: 0;
+}
+
+h1 {
   font-size: 34px;
-  line-height: 1.1;
+  line-height: 1.05;
   letter-spacing: 0;
 }
 
-.lede {
-  margin: 14px 0 28px;
-  color: #526070;
-  line-height: 1.55;
+h2 {
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+h3 {
+  margin: 24px 0 10px;
+  color: #344054;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.upload-panel,
+.files-panel {
+  background: #ffffff;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.06);
+}
+
+.files-panel {
+  min-height: 520px;
+}
+
+form,
+label {
+  display: grid;
 }
 
 form {
-  display: grid;
-  gap: 18px;
+  gap: 14px;
+  margin-top: 18px;
 }
 
 label {
-  display: grid;
-  gap: 8px;
+  gap: 7px;
   color: #374151;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 680;
 }
 
-input {
+input,
+select,
+textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  padding: 12px;
+  padding: 10px 11px;
   font: inherit;
   background: #ffffff;
+  color: #121826;
+}
+
+textarea {
+  resize: vertical;
 }
 
 button {
   border: 0;
   border-radius: 6px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   font: inherit;
-  font-weight: 750;
+  font-weight: 740;
   color: #ffffff;
   background: #111827;
   cursor: pointer;
@@ -88,9 +135,33 @@ button:hover {
   background: #243044;
 }
 
+.password {
+  width: min(420px, 100%);
+}
+
+.files-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.files-header p {
+  margin-top: 6px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 160px auto;
+  gap: 10px;
+}
+
 .status {
   min-height: 24px;
-  margin-top: 20px;
+  margin-top: 16px;
   color: #526070;
   overflow-wrap: anywhere;
 }
@@ -103,9 +174,16 @@ button:hover {
   color: #b42318;
 }
 
-.status a {
+.status a,
+.file-name {
   color: #1d4ed8;
-  font-weight: 700;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.status a:hover,
+.file-name:hover {
+  text-decoration: underline;
 }
 
 .copy {
@@ -116,12 +194,89 @@ button:hover {
   background: #e5e7eb;
 }
 
-@media (max-width: 520px) {
-  .panel {
-    padding: 24px;
+.files-empty {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  color: #667085;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+  gap: 18px;
+  padding: 14px 0;
+  border-top: 1px solid #eef2f6;
+}
+
+.file-row:first-of-type {
+  border-top: 0;
+}
+
+.meta {
+  margin-top: 5px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 8px;
+  margin-top: 10px;
+}
+
+.chips span {
+  padding: 4px 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #344054;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.note {
+  margin-top: 9px;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.organize-form {
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.organize-form input[name="note"] {
+  grid-column: 1 / -1;
+}
+
+.organize-form button {
+  justify-self: end;
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    padding: 18px;
   }
 
-  h1 {
-    font-size: 28px;
+  .toolbar,
+  .files-header {
+    display: grid;
+  }
+
+  .workspace,
+  .file-row {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
   }
 }

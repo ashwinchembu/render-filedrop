@@ -75,6 +75,40 @@ paths:
               schema:
                 type: string
                 format: binary
+  /api/files/{id}:
+    patch:
+      operationId: updateFileMetadata
+      summary: Update category, tags, and note for an uploaded file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category:
+                  type: string
+                tags:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Updated file metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileRecord"
 components:
   securitySchemes:
     bearerAuth:
@@ -95,6 +129,14 @@ components:
         uploadedAt:
           type: string
           format: date-time
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        note:
+          type: string
         downloadUrl:
           type: string
           format: uri
