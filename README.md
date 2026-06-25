@@ -99,6 +99,45 @@ Shared mailbox endpoints:
 - `GET /api/messages?unreadOnly=true`: list unread messages.
 - `PATCH /api/messages/<message-id>/read`: mark a message read.
 
+Webhook endpoints:
+
+- `POST /api/webhooks`: register an outgoing webhook. Body: `url`, optional `name`, `to`, `secret`.
+- `GET /api/webhooks`: list registered webhooks.
+- `POST /api/webhooks/<webhook-id>/test`: send a test delivery.
+- `DELETE /api/webhooks/<webhook-id>`: delete a webhook.
+
+When a mailbox message is created, matching webhooks receive:
+
+- `x-filedrop-event: message.created`
+- `x-filedrop-delivery: <uuid>`
+- `x-filedrop-signature: sha256=<hmac>` when a secret is configured
+
+## No-Admin Windows Webhook Receiver
+
+Run the receiver locally:
+
+```powershell
+$env:FILEDROP_WEBHOOK_SECRET="choose-a-shared-secret"
+node .\scripts\webhook-receiver.mjs
+```
+
+Expose it with a user-space tunnel such as Cloudflare Tunnel or ngrok. For Cloudflare Tunnel, download the Windows zip, unzip it in your user folder, then run:
+
+```powershell
+.\cloudflared.exe tunnel --url http://127.0.0.1:8787
+```
+
+Register the public tunnel URL:
+
+```sh
+curl -X POST "$BASE_URL/api/webhooks" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ashwin-remote-codex","to":"ashwin-remote-codex","url":"https://your-tunnel.trycloudflare.com/webhook","secret":"choose-a-shared-secret"}'
+```
+
+This receiver prints incoming events and appends them to `webhook-inbox.jsonl`.
+
 ## Connecting an API Client
 
 Use `openapi.yaml` as the API schema. Replace the `servers[0].url` value with your Render URL, then configure bearer authentication with the `API_KEY` value from Render.
@@ -135,6 +174,9 @@ Available MCP tools:
 - `send_message`: post a mailbox message for another session.
 - `list_messages`: read mailbox messages.
 - `mark_message_read`: mark a message read.
+- `register_webhook`: register a push webhook for new messages.
+- `list_webhooks`: list registered webhooks.
+- `delete_webhook`: remove a webhook.
 - `import_chatgpt_files`: save files attached in ChatGPT into the filedrop.
 - `upload_from_url`: pull a downloadable URL into the filedrop.
 - `upload_new_version_from_url`: save a URL as the next version of a stored file.

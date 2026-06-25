@@ -305,6 +305,7 @@ async function createMessage(body = {}) {
   };
   meta.messages.unshift(message);
   await writeMeta(meta);
+  await triggerWebhooks("message.created", { message: publicMessage(message) });
   return message;
 }
 
@@ -326,6 +327,107 @@ async function markMessageRead(id) {
   message.readAt = new Date().toISOString();
   await writeMeta(meta);
   return message;
+}
+
+function publicWebhook(webhook) {
+  return {
+    id: webhook.id,
+    name: webhook.name || "",
+    url: webhook.url,
+    event: webhook.event || "message.created",
+    to: webhook.to || "",
+    createdAt: webhook.createdAt,
+    hasSecret: Boolean(webhook.secret)
+  };
+}
+
+async function createWebhook(body = {}) {
+  let url;
+  try {
+    url = new URL(String(body.url || ""));
+  } catch {
+    const error = new Error("Invalid webhook URL");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    const error = new Error("Webhook URL must use http or https");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const meta = await readMeta();
+  meta.webhooks ||= [];
+  const webhook = {
+    id: crypto.randomUUID(),
+    name: cleanText(body.name, 120) || url.hostname,
+    url: url.toString(),
+    event: cleanText(body.event, 80) || "message.created",
+    to: cleanText(body.to, 80),
+    secret: cleanText(body.secret, 200) || crypto.randomBytes(24).toString("base64url"),
+    createdAt: new Date().toISOString()
+  };
+  meta.webhooks.unshift(webhook);
+  await writeMeta(meta);
+  return webhook;
+}
+
+async function deleteWebhook(id) {
+  const meta = await readMeta();
+  meta.webhooks ||= [];
+  const previousLength = meta.webhooks.length;
+  meta.webhooks = meta.webhooks.filter((webhook) => webhook.id !== id);
+  if (meta.webhooks.length === previousLength) return false;
+  await writeMeta(meta);
+  return true;
+}
+
+function webhookMatches(webhook, event, payload) {
+  if ((webhook.event || "message.created") !== event) return false;
+  if (!webhook.to) return true;
+  const messageTo = payload?.message?.to || "";
+  return messageTo === webhook.to || messageTo === "all";
+}
+
+function signWebhook(secret, body) {
+  return `sha256=${crypto.createHmac("sha256", secret).update(body).digest("hex")}`;
+}
+
+async function deliverWebhook(webhook, event, payload) {
+  const deliveryId = crypto.randomUUID();
+  const body = JSON.stringify({
+    id: deliveryId,
+    event,
+    createdAt: new Date().toISOString(),
+    data: payload
+  });
+  const headers = {
+    "content-type": "application/json",
+    "x-filedrop-event": event,
+    "x-filedrop-delivery": deliveryId
+  };
+  if (webhook.secret) headers["x-filedrop-signature"] = signWebhook(webhook.secret, body);
+
+  const response = await fetch(webhook.url, {
+    method: "POST",
+    headers,
+    body,
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) throw new Error(`Webhook ${webhook.id} failed: ${response.status}`);
+}
+
+async function triggerWebhooks(event, payload) {
+  const meta = await readMeta();
+  const webhooks = (meta.webhooks || []).filter((webhook) => webhookMatches(webhook, event, payload));
+  if (!webhooks.length) return [];
+  const deliveries = await Promise.allSettled(webhooks.map((webhook) => deliverWebhook(webhook, event, payload)));
+  deliveries.forEach((delivery, index) => {
+    if (delivery.status === "rejected") {
+      console.error(`Webhook delivery failed for ${webhooks[index].id}:`, delivery.reason);
+    }
+  });
+  return deliveries;
 }
 
 async function saveUploadedFile(file, body = {}) {
@@ -621,6 +723,59 @@ function createMcpServer(req) {
       const message = await markMessageRead(id);
       if (!message) throw new Error("Message not found");
       return mcpTextAndStructured(`Marked message ${id} read.`, { message: publicMessage(message) });
+    }
+  );
+
+  server.registerTool(
+    "register_webhook",
+    {
+      title: "Register webhook",
+      description: "Register an outgoing webhook that fires when matching mailbox messages are created.",
+      inputSchema: {
+        url: z.url().describe("Public receiver URL to POST events to."),
+        name: z.string().optional(),
+        to: z.string().optional().describe("Only deliver messages addressed to this mailbox name."),
+        secret: z.string().optional().describe("Optional HMAC signing secret. If omitted one is generated.")
+      }
+    },
+    async (input) => {
+      const webhook = await createWebhook(input);
+      return mcpTextAndStructured(`Registered webhook ${webhook.id}. Save the returned secret for signature verification.`, {
+        webhook: { ...publicWebhook(webhook), secret: webhook.secret }
+      });
+    }
+  );
+
+  server.registerTool(
+    "list_webhooks",
+    {
+      title: "List webhooks",
+      description: "List registered outgoing webhooks.",
+      inputSchema: {}
+    },
+    async () => {
+      const meta = await readMeta();
+      const webhooks = (meta.webhooks || []).map(publicWebhook);
+      const text = webhooks.length
+        ? webhooks.map((webhook) => `${webhook.id} | ${webhook.event} | ${webhook.to || "all"} -> ${webhook.url}`).join("\n")
+        : "No webhooks registered.";
+      return mcpTextAndStructured(text, { webhooks });
+    }
+  );
+
+  server.registerTool(
+    "delete_webhook",
+    {
+      title: "Delete webhook",
+      description: "Delete a registered webhook.",
+      inputSchema: {
+        id: z.string().describe("Webhook ID.")
+      }
+    },
+    async ({ id }) => {
+      const deleted = await deleteWebhook(id);
+      if (!deleted) throw new Error("Webhook not found");
+      return mcpTextAndStructured(`Deleted webhook ${id}.`, { id });
     }
   );
 
@@ -955,6 +1110,64 @@ app.patch("/api/messages/:id/read", requireConfiguredSecret(apiKey, "API_KEY"), 
       return;
     }
     res.json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/webhooks", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (_req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ webhooks: (meta.webhooks || []).map(publicWebhook) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/webhooks", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const webhook = await createWebhook(req.body);
+    res.status(201).json({ ...publicWebhook(webhook), secret: webhook.secret });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/webhooks/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const deleted = await deleteWebhook(req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: "Webhook not found" });
+      return;
+    }
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/webhooks/:id/test", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const webhook = (meta.webhooks || []).find((item) => item.id === req.params.id);
+    if (!webhook) {
+      res.status(404).json({ error: "Webhook not found" });
+      return;
+    }
+    await deliverWebhook(webhook, "message.created", {
+      message: {
+        id: "test",
+        from: "filedrop",
+        to: webhook.to || "all",
+        body: "Test webhook delivery",
+        createdAt: new Date().toISOString(),
+        project: "Comms",
+        relatedFileId: "",
+        relatedUrl: "",
+        readAt: ""
+      }
+    });
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }

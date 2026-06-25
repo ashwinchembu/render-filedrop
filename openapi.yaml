@@ -165,6 +165,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageRecord"
+  /api/webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List outgoing webhooks.
+      responses:
+        "200":
+          description: Registered webhooks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookRecord"
+    post:
+      operationId: registerWebhook
+      summary: Register an outgoing webhook for mailbox events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                  format: uri
+                to:
+                  type: string
+                  description: Only deliver messages addressed to this name.
+                secret:
+                  type: string
+                  description: Optional HMAC signing secret.
+      responses:
+        "201":
+          description: Registered webhook. Includes the secret once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookRecord"
+  /api/webhooks/{id}/test:
+    post:
+      operationId: testWebhook
+      summary: Send a test delivery to a webhook.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Test delivery result.
+  /api/webhooks/{id}:
+    delete:
+      operationId: deleteWebhook
+      summary: Delete an outgoing webhook.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
   /api/files/{id}/download:
     get:
       operationId: downloadFile
@@ -350,4 +422,25 @@ components:
           type: string
           format: uri
         readAt:
+          type: string
+    WebhookRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        event:
+          type: string
+        to:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        hasSecret:
+          type: boolean
+        secret:
           type: string
