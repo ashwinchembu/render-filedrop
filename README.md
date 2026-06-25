@@ -7,7 +7,7 @@ A tiny Render-hosted file bridge for moving files between computers.
 - Password-protected browser upload page.
 - Unguessable public download links for individual files.
 - API-key-protected upload, list, and download endpoints.
-- Render persistent disk support through `render.yaml`.
+- S3 or S3-compatible storage support through `render.yaml`.
 
 ## Deploy on Render
 
@@ -18,7 +18,18 @@ A tiny Render-hosted file bridge for moving files between computers.
    - `UPLOAD_PASSWORD`: use this in the web page.
    - `API_KEY`: use this for API access.
 
-The blueprint uses a 1 GB persistent disk mounted at `/var/data`. Increase `sizeGB` in `render.yaml` if you need more storage.
+The blueprint uses Render's free web service plan with temporary local storage by default. Files survive ordinary requests, but can disappear when Render restarts the free instance.
+
+For durable S3-compatible storage, set these environment variables in Render:
+
+- `STORAGE_DRIVER=s3`
+- `S3_BUCKET`
+- `S3_REGION`
+- `S3_PREFIX=filedrop`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+For Cloudflare R2 or another S3-compatible provider, also set `S3_ENDPOINT` and usually `S3_FORCE_PATH_STYLE=true`.
 
 ## API
 
