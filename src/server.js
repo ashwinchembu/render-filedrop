@@ -13,6 +13,7 @@ import helmet from "helmet";
 import multer from "multer";
 
 const app = express();
+app.set("trust proxy", true);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST;
 const storageDir = process.env.STORAGE_DIR || path.resolve("data");
