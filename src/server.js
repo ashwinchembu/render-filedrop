@@ -20,7 +20,7 @@ const app = express();
 app.set("trust proxy", true);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST;
-const storageDir = process.env.STORAGE_DIR || path.resolve("data");
+let storageDir = process.env.STORAGE_DIR || path.resolve("data");
 const storageDriver = process.env.STORAGE_DRIVER || "local";
 const uploadPassword = process.env.UPLOAD_PASSWORD || "";
 const apiKey = process.env.API_KEY || "";
@@ -31,8 +31,8 @@ const s3Region = process.env.S3_REGION || "us-east-1";
 const s3Endpoint = process.env.S3_ENDPOINT || undefined;
 const s3ForcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
 
-const filesDir = path.join(storageDir, "files");
-const metaPath = path.join(storageDir, "metadata.json");
+let filesDir = path.join(storageDir, "files");
+let metaPath = path.join(storageDir, "metadata.json");
 const mcpTransports = {};
 
 const s3 =
@@ -45,7 +45,20 @@ const s3 =
     : null;
 
 if (storageDriver === "local") {
-  await fs.mkdir(filesDir, { recursive: true });
+  try {
+    await fs.mkdir(filesDir, { recursive: true });
+  } catch (error) {
+    if (error?.code !== "EACCES" || !storageDir.startsWith("/var/data")) {
+      throw error;
+    }
+    storageDir = "/tmp/filedrop";
+    filesDir = path.join(storageDir, "files");
+    metaPath = path.join(storageDir, "metadata.json");
+    console.warn(
+      "Persistent disk path is not writable yet; temporarily using /tmp/filedrop."
+    );
+    await fs.mkdir(filesDir, { recursive: true });
+  }
 }
 
 app.use(
