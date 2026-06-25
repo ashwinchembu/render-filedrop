@@ -8,6 +8,7 @@ A tiny Render-hosted file bridge for moving files between computers.
 - File library grouped by day, month, or category.
 - Category, tag, and note fields for organizing files.
 - GitHub-lite project, path, version history, and commit-message fields.
+- Shared mailbox for Codex-to-Codex handoffs and status messages.
 - Unguessable public download links for individual files.
 - API-key-protected upload, list, and download endpoints.
 - MCP server endpoint for connecting as a ChatGPT custom app.
@@ -91,6 +92,13 @@ Project and history endpoints:
 - `GET /api/projects`: list project buckets with current file and version counts.
 - `GET /api/files/<file-id>/history`: list the version chain for a file.
 
+Shared mailbox endpoints:
+
+- `POST /api/messages`: send a message. Body: `from`, `to`, `body`, optional `project`, `relatedFileId`, `relatedUrl`.
+- `GET /api/messages?to=<name>`: list messages for a recipient, including messages sent to `all`.
+- `GET /api/messages?unreadOnly=true`: list unread messages.
+- `PATCH /api/messages/<message-id>/read`: mark a message read.
+
 ## Connecting an API Client
 
 Use `openapi.yaml` as the API schema. Replace the `servers[0].url` value with your Render URL, then configure bearer authentication with the `API_KEY` value from Render.
@@ -124,6 +132,9 @@ Available MCP tools:
 
 - `list_files`: find stored files and group them by day, month, or category.
 - `list_projects`: list project buckets and version counts.
+- `send_message`: post a mailbox message for another session.
+- `list_messages`: read mailbox messages.
+- `mark_message_read`: mark a message read.
 - `import_chatgpt_files`: save files attached in ChatGPT into the filedrop.
 - `upload_from_url`: pull a downloadable URL into the filedrop.
 - `upload_new_version_from_url`: save a URL as the next version of a stored file.
@@ -134,7 +145,7 @@ Available MCP tools:
 Suggested ChatGPT instructions:
 
 ```text
-Use my Private Filedrop MCP tools to move files between computers. Treat projects and paths like lightweight repos. Save attached files with import_chatgpt_files, list stored files with list_files, organize files with organize_file, upload follow-up versions with upload_new_version_from_url when I am replacing a file, inspect history with get_file_history, and give me direct links with get_file_link. Prefer categories like Work, Receipts, Personal, or Transfers when I do not specify one.
+Use my Private Filedrop MCP tools to move files between computers and coordinate with my other Codex sessions. Treat projects and paths like lightweight repos. Use send_message and list_messages as a shared mailbox for handoffs. Save attached files with import_chatgpt_files, list stored files with list_files, organize files with organize_file, upload follow-up versions with upload_new_version_from_url when I am replacing a file, inspect history with get_file_history, and give me direct links with get_file_link. Prefer categories like Work, Receipts, Personal, or Transfers when I do not specify one.
 ```
 
 ## Local Run

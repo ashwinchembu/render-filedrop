@@ -79,6 +79,92 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ProjectRecord"
+  /api/messages:
+    get:
+      operationId: listMessages
+      summary: List mailbox messages for Codex-to-Codex coordination.
+      parameters:
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MessageRecord"
+    post:
+      operationId: sendMessage
+      summary: Send a mailbox message to another session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                from:
+                  type: string
+                to:
+                  type: string
+                body:
+                  type: string
+                project:
+                  type: string
+                relatedFileId:
+                  type: string
+                relatedUrl:
+                  type: string
+                  format: uri
+      responses:
+        "201":
+          description: Created message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageRecord"
+  /api/messages/{id}/read:
+    patch:
+      operationId: markMessageRead
+      summary: Mark a mailbox message as read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageRecord"
   /api/files/{id}/download:
     get:
       operationId: downloadFile
@@ -241,4 +327,27 @@ components:
         versions:
           type: integer
         latestUpload:
+          type: string
+    MessageRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        project:
+          type: string
+        relatedFileId:
+          type: string
+        relatedUrl:
+          type: string
+          format: uri
+        readAt:
           type: string

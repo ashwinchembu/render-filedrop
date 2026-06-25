@@ -268,6 +268,66 @@ function definedMetadata(input = {}) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 }
 
+function publicMessage(message) {
+  return {
+    id: message.id,
+    from: message.from || "",
+    to: message.to || "",
+    body: message.body || "",
+    createdAt: message.createdAt,
+    project: message.project || "",
+    relatedFileId: message.relatedFileId || "",
+    relatedUrl: message.relatedUrl || "",
+    readAt: message.readAt || ""
+  };
+}
+
+async function createMessage(body = {}) {
+  const text = cleanText(body.body, 4000);
+  if (!text) {
+    const error = new Error("Missing message body");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const meta = await readMeta();
+  meta.messages ||= [];
+  const message = {
+    id: crypto.randomUUID(),
+    from: cleanText(body.from, 80) || "unknown",
+    to: cleanText(body.to, 80) || "all",
+    body: text,
+    createdAt: new Date().toISOString(),
+    project: cleanText(body.project, 120),
+    relatedFileId: cleanText(body.relatedFileId, 80),
+    relatedUrl: cleanText(body.relatedUrl, 500),
+    readAt: ""
+  };
+  meta.messages.unshift(message);
+  await writeMeta(meta);
+  return message;
+}
+
+function filterMessages(messages = [], { to, from, since, unreadOnly } = {}) {
+  return messages.filter((message) => {
+    if (to && !["all", to].includes(message.to || "all")) return false;
+    if (from && message.from !== from) return false;
+    if (since && message.createdAt <= since) return false;
+    if (unreadOnly && message.readAt) return false;
+    return true;
+  });
+}
+
+async function markMessageRead(id) {
+  const meta = await readMeta();
+  meta.messages ||= [];
+  const message = meta.messages.find((item) => item.id === id);
+  if (!message) return null;
+  message.readAt = new Date().toISOString();
+  await writeMeta(meta);
+  return message;
+}
+
 async function saveUploadedFile(file, body = {}) {
   if (!storageConfigured()) {
     const error = new Error("Storage is not configured");
@@ -503,6 +563,64 @@ function createMcpServer(req) {
         ? projects.map((project) => `${project.name} | ${project.files} current file(s), ${project.versions} version(s)`).join("\n")
         : "No projects found.";
       return mcpTextAndStructured(text, { projects });
+    }
+  );
+
+  server.registerTool(
+    "send_message",
+    {
+      title: "Send message",
+      description: "Post a mailbox message for another Codex or ChatGPT session.",
+      inputSchema: {
+        from: z.string().optional().describe("Sender name, such as macbook-codex or work-codex."),
+        to: z.string().optional().describe("Recipient name, or all."),
+        body: z.string().describe("Message body."),
+        project: z.string().optional().describe("Optional project context."),
+        relatedFileId: z.string().optional().describe("Optional file ID this message refers to."),
+        relatedUrl: z.url().optional().describe("Optional URL this message refers to.")
+      }
+    },
+    async (input) => {
+      const message = publicMessage(await createMessage(input));
+      return mcpTextAndStructured(`Sent message ${message.id} to ${message.to}.`, { message });
+    }
+  );
+
+  server.registerTool(
+    "list_messages",
+    {
+      title: "List messages",
+      description: "List mailbox messages, optionally filtered by recipient, sender, or unread status.",
+      inputSchema: {
+        to: z.string().optional().describe("Only messages to this recipient, plus all."),
+        from: z.string().optional().describe("Only messages from this sender."),
+        since: z.string().optional().describe("Only messages created after this ISO timestamp."),
+        unreadOnly: z.boolean().optional().describe("Only messages that have not been marked read.")
+      }
+    },
+    async (input) => {
+      const meta = await readMeta();
+      const messages = filterMessages(meta.messages || [], input).map(publicMessage);
+      const text = messages.length
+        ? messages.map((message) => `${message.id} | ${message.createdAt} | ${message.from} -> ${message.to}: ${message.body}`).join("\n")
+        : "No messages found.";
+      return mcpTextAndStructured(text, { messages });
+    }
+  );
+
+  server.registerTool(
+    "mark_message_read",
+    {
+      title: "Mark message read",
+      description: "Mark a mailbox message as read.",
+      inputSchema: {
+        id: z.string().describe("Message ID from list_messages.")
+      }
+    },
+    async ({ id }) => {
+      const message = await markMessageRead(id);
+      if (!message) throw new Error("Message not found");
+      return mcpTextAndStructured(`Marked message ${id} read.`, { message: publicMessage(message) });
     }
   );
 
@@ -805,6 +923,43 @@ app.get("/api/projects", requireConfiguredSecret(apiKey, "API_KEY"), requireApiK
   }
 });
 
+app.get("/api/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const messages = filterMessages(meta.messages || [], {
+      to: cleanText(req.query.to, 80),
+      from: cleanText(req.query.from, 80),
+      since: cleanText(req.query.since, 80),
+      unreadOnly: req.query.unreadOnly === "true"
+    }).map(publicMessage);
+    res.json({ messages });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const message = await createMessage(req.body);
+    res.status(201).json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/messages/:id/read", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const message = await markMessageRead(req.params.id);
+    if (!message) {
+      res.status(404).json({ error: "Message not found" });
+      return;
+    }
+    res.json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/files/:id/history", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
     const meta = await readMeta();
@@ -846,6 +1001,43 @@ app.get("/web/projects", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWOR
   try {
     const meta = await readMeta();
     res.json({ projects: projectSummary(meta.files) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/web/messages", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const messages = filterMessages(meta.messages || [], {
+      to: cleanText(req.query.to, 80),
+      from: cleanText(req.query.from, 80),
+      since: cleanText(req.query.since, 80),
+      unreadOnly: req.query.unreadOnly === "true"
+    }).map(publicMessage);
+    res.json({ messages });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/web/messages", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const message = await createMessage(req.body);
+    res.status(201).json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/web/messages/:id/read", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
+  try {
+    const message = await markMessageRead(req.params.id);
+    if (!message) {
+      res.status(404).json({ error: "Message not found" });
+      return;
+    }
+    res.json(publicMessage(message));
   } catch (error) {
     next(error);
   }
