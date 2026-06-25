@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Private Filedrop</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <div>
+          <p class="eyebrow">Private file bridge</p>
+          <h1>Upload here. Download anywhere.</h1>
+          <p class="lede">Use the shared password to create a download link for your other computer or for API access.</p>
+        </div>
+
+        <form id="uploadForm">
+          <label>
+            Password
+            <input id="password" name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <label>
+            File
+            <input id="file" name="file" type="file" required />
+          </label>
+          <button type="submit">Upload file</button>
+        </form>
+
+        <div id="status" class="status" role="status"></div>
+      </section>
+    </main>
+    <script src="/script.js"></script>
+  </body>
+</html>

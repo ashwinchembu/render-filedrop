@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: Private Filedrop API
+  version: 1.0.0
+  description: API for listing, uploading, and downloading private file-drop documents.
+servers:
+  - url: https://your-render-service.onrender.com
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      summary: Check whether the file-drop service is running.
+      security: []
+      responses:
+        "200":
+          description: Service status.
+  /api/files:
+    get:
+      operationId: listFiles
+      summary: List uploaded files.
+      responses:
+        "200":
+          description: Uploaded files.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileRecord"
+  /api/upload:
+    post:
+      operationId: uploadFile
+      summary: Upload a file.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Uploaded file metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileRecord"
+  /api/files/{id}/download:
+    get:
+      operationId: downloadFile
+      summary: Download an uploaded file by ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    FileRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+        mimeType:
+          type: string
+        uploadedAt:
+          type: string
+          format: date-time
+        downloadUrl:
+          type: string
+          format: uri

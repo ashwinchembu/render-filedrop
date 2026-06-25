@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: private-filedrop
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: filedrop-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DIR
+        value: /var/data
+      - key: MAX_UPLOAD_MB
+        value: 250
+      - key: UPLOAD_PASSWORD
+        generateValue: true
+      - key: API_KEY
+        generateValue: true
