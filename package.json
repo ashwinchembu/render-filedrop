@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "webhook-receiver": "node scripts/webhook-receiver.mjs"
+    "webhook-receiver": "node scripts/webhook-receiver.mjs",
+    "migrate:local-to-s3": "node scripts/migrate-local-to-s3.mjs"
   },
   "engines": {
     "node": ">=20"

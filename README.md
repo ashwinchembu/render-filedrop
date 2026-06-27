@@ -38,6 +38,24 @@ For durable S3-compatible storage, set these environment variables in Render:
 
 For Cloudflare R2 or another S3-compatible provider, also set `S3_ENDPOINT` and usually `S3_FORCE_PATH_STYLE=true`.
 
+### Migrating the existing Render disk to S3
+
+The app stores file records, mailbox messages, channels, and webhook registrations in one `metadata.json`, and stores uploaded file bytes under `files/`. To keep existing handoffs and file history, migrate the local disk before switching production traffic fully to S3.
+
+1. Create the bucket and an access key that can read/write the bucket prefix.
+2. In Render, set `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. Keep the existing disk mounted until the migration is verified.
+3. Temporarily keep `STORAGE_DRIVER=local`, open a Render shell, and run:
+
+   ```sh
+   npm run migrate:local-to-s3 -- --dry-run
+   npm run migrate:local-to-s3
+   ```
+
+4. Set `STORAGE_DRIVER=s3` and redeploy.
+5. Verify `/healthz`, `GET /api/files`, and `GET /api/messages?to=ashwin-main-codex&unreadOnly=true`.
+
+Keep the disk attached until the S3-backed service has been stable for a few polling cycles. It is useful as a rollback source.
+
 ## API
 
 Set:

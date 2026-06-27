@@ -19,6 +19,20 @@ services:
         value: /var/data/filedrop
       - key: MAX_UPLOAD_MB
         value: 250
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_PREFIX
+        value: filedrop
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
       - key: UPLOAD_PASSWORD
         generateValue: true
       - key: API_KEY
