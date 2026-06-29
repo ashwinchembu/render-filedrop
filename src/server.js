@@ -17,6 +17,11 @@ import express from "express";
 import helmet from "helmet";
 import multer from "multer";
 import * as z from "zod/v4";
+import {
+  buildOrganizedMetadataObjects,
+  normalizeStoragePrefix,
+  storageObjectKey
+} from "./storage-layout.js";
 
 const app = express();
 app.set("trust proxy", true);
@@ -28,7 +33,7 @@ const uploadPassword = process.env.UPLOAD_PASSWORD || "";
 const apiKey = process.env.API_KEY || "";
 const maxUploadMb = Number(process.env.MAX_UPLOAD_MB || 250);
 const s3Bucket = process.env.S3_BUCKET || "";
-const s3Prefix = (process.env.S3_PREFIX || "filedrop").replace(/^\/+|\/+$/g, "");
+const s3Prefix = normalizeStoragePrefix(process.env.S3_PREFIX || "filedrop");
 const s3Region = process.env.S3_REGION || "us-east-1";
 const s3Endpoint = process.env.S3_ENDPOINT || undefined;
 const s3ForcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
@@ -84,14 +89,6 @@ const upload = multer({
 
 function s3Key(name) {
   return s3Prefix ? `${s3Prefix}/${name}` : name;
-}
-
-function normalizeS3Prefix(value) {
-  return String(value || "filedrop").replace(/^\/+|\/+$/g, "");
-}
-
-function adminS3Key(prefix, name) {
-  return prefix ? `${prefix}/${name}` : name;
 }
 
 function storageConfigured() {
@@ -841,7 +838,7 @@ async function migrateLocalStorageToS3(body = {}) {
     throw error;
   }
 
-  const prefix = normalizeS3Prefix(body.prefix ?? s3Prefix);
+  const prefix = normalizeStoragePrefix(body.prefix ?? s3Prefix);
   const dryRun = body.dryRun !== false;
   const client = createAdminS3Client(body);
   const meta = await readMeta();
@@ -858,7 +855,7 @@ async function migrateLocalStorageToS3(body = {}) {
 
   for (const file of files) {
     if (!file.storageName) continue;
-    const key = adminS3Key(prefix, `files/${file.storageName}`);
+    const key = storageObjectKey(prefix, `files/${file.storageName}`);
     const exists = await s3ObjectExists(client, bucket, key);
     if (exists) {
       result.existing.push({ id: file.id, key });
@@ -890,18 +887,37 @@ async function migrateLocalStorageToS3(body = {}) {
     result.uploaded.push({ id: file.id, key, size: bytes.length });
   }
 
-  const metadataKey = adminS3Key(prefix, "metadata.json");
+  const metadataKey = storageObjectKey(prefix, "metadata.json");
+  const metadataBody = JSON.stringify(meta, null, 2);
   if (!dryRun) {
     await client.send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: metadataKey,
-        Body: JSON.stringify(meta, null, 2),
+        Body: metadataBody,
         ContentType: "application/json"
       })
     );
   }
-  result.metadata = { key: metadataKey, bytes: Buffer.byteLength(JSON.stringify(meta, null, 2)) };
+  const organizedObjects = buildOrganizedMetadataObjects(meta);
+  for (const object of organizedObjects) {
+    const key = storageObjectKey(prefix, object.key);
+    if (!dryRun) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: object.body,
+          ContentType: object.contentType
+        })
+      );
+    }
+  }
+  result.metadata = { key: metadataKey, bytes: Buffer.byteLength(metadataBody) };
+  result.organized = {
+    objects: organizedObjects.length,
+    keys: organizedObjects.map((object) => storageObjectKey(prefix, object.key))
+  };
   return result;
 }
 

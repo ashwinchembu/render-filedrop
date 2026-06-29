@@ -5,12 +5,17 @@ import {
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
+import {
+  buildOrganizedMetadataObjects,
+  normalizeStoragePrefix,
+  storageObjectKey
+} from "../src/storage-layout.js";
 
 const storageDir = process.env.STORAGE_DIR || path.resolve("data");
 const filesDir = path.join(storageDir, "files");
 const metadataPath = path.join(storageDir, "metadata.json");
 const bucket = process.env.S3_BUCKET || "";
-const prefix = (process.env.S3_PREFIX || "filedrop").replace(/^\/+|\/+$/g, "");
+const prefix = normalizeStoragePrefix(process.env.S3_PREFIX || "filedrop");
 const region = process.env.S3_REGION || "us-east-1";
 const endpoint = process.env.S3_ENDPOINT || undefined;
 const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
@@ -24,7 +29,7 @@ if (!bucket) {
 const s3 = new S3Client({ region, endpoint, forcePathStyle });
 
 function key(name) {
-  return prefix ? `${prefix}/${name}` : name;
+  return storageObjectKey(prefix, name);
 }
 
 async function exists(objectKey) {
@@ -78,6 +83,11 @@ async function main() {
   }
 
   await put(key("metadata.json"), metadataBytes, "application/json");
+  const organizedObjects = buildOrganizedMetadataObjects(metadata);
+  for (const object of organizedObjects) {
+    await put(key(object.key), object.body, object.contentType);
+  }
+  console.log(`organized metadata objects: ${organizedObjects.length}`);
   console.log("migration complete");
 }
 

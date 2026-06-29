@@ -56,6 +56,29 @@ The app stores file records, mailbox messages, channels, and webhook registratio
 
 Keep the disk attached until the S3-backed service has been stable for a few polling cycles. It is useful as a rollback source.
 
+### S3 layout
+
+The app keeps these canonical objects for compatibility:
+
+- `filedrop/metadata.json`: full application state.
+- `filedrop/files/{storageName}`: uploaded file bytes.
+
+Migration and backup jobs also write organized mirrors so the bucket is easier to browse:
+
+- `filedrop/manifests/storage-layout.json`: layout manifest.
+- `filedrop/state/metadata.json`: full state snapshot duplicate.
+- `filedrop/indexes/files.json`: file records only.
+- `filedrop/indexes/projects.json`: project summary.
+- `filedrop/mailbox/messages.json`: all control mailbox messages.
+- `filedrop/mailbox/unread.json`: unread control mailbox messages.
+- `filedrop/mailbox/by-recipient/{recipient}.json`: mailbox split by recipient.
+- `filedrop/channels/channels.json`: channel definitions.
+- `filedrop/channels/messages.json`: all channel messages.
+- `filedrop/channels/by-channel/{channelId}.json`: channel messages split by channel.
+- `filedrop/webhooks/webhooks.json`: webhook registrations.
+
+Production currently uses the Render persistent disk. S3 can be kept as a browsable backup/archive by running the migration endpoint or script while `STORAGE_DRIVER=local`.
+
 ## API
 
 Set:
