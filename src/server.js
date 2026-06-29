@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
@@ -83,6 +84,14 @@ const upload = multer({
 
 function s3Key(name) {
   return s3Prefix ? `${s3Prefix}/${name}` : name;
+}
+
+function normalizeS3Prefix(value) {
+  return String(value || "filedrop").replace(/^\/+|\/+$/g, "");
+}
+
+function adminS3Key(prefix, name) {
+  return prefix ? `${prefix}/${name}` : name;
 }
 
 function storageConfigured() {
@@ -793,6 +802,109 @@ async function saveUrlFileWithMetadata({ url, name, category, tags, note, projec
   return publicFile(record, req);
 }
 
+function createAdminS3Client(body = {}) {
+  const config = {
+    region: cleanText(body.region, 80) || s3Region,
+    endpoint: cleanText(body.endpoint, 500) || undefined,
+    forcePathStyle: body.forcePathStyle === true
+  };
+  if (body.accessKeyId || body.secretAccessKey) {
+    config.credentials = {
+      accessKeyId: String(body.accessKeyId || ""),
+      secretAccessKey: String(body.secretAccessKey || "")
+    };
+  }
+  return new S3Client(config);
+}
+
+async function s3ObjectExists(client, bucket, key) {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (error) {
+    if (error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) return false;
+    throw error;
+  }
+}
+
+async function migrateLocalStorageToS3(body = {}) {
+  if (storageDriver !== "local") {
+    const error = new Error("Migration can only run while STORAGE_DRIVER is local");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const bucket = cleanText(body.bucket, 200) || s3Bucket;
+  if (!bucket) {
+    const error = new Error("S3 bucket is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const prefix = normalizeS3Prefix(body.prefix ?? s3Prefix);
+  const dryRun = body.dryRun !== false;
+  const client = createAdminS3Client(body);
+  const meta = await readMeta();
+  const files = Array.isArray(meta.files) ? meta.files : [];
+  const result = {
+    sourceStorageDir: storageDir,
+    target: { bucket, prefix },
+    dryRun,
+    fileRecords: files.length,
+    uploaded: [],
+    existing: [],
+    missing: []
+  };
+
+  for (const file of files) {
+    if (!file.storageName) continue;
+    const key = adminS3Key(prefix, `files/${file.storageName}`);
+    const exists = await s3ObjectExists(client, bucket, key);
+    if (exists) {
+      result.existing.push({ id: file.id, key });
+      continue;
+    }
+
+    const sourcePath = path.join(filesDir, file.storageName);
+    let bytes;
+    try {
+      bytes = await fs.readFile(sourcePath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        result.missing.push({ id: file.id, storageName: file.storageName });
+        continue;
+      }
+      throw error;
+    }
+
+    if (!dryRun) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: bytes,
+          ContentType: file.mimeType || "application/octet-stream"
+        })
+      );
+    }
+    result.uploaded.push({ id: file.id, key, size: bytes.length });
+  }
+
+  const metadataKey = adminS3Key(prefix, "metadata.json");
+  if (!dryRun) {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: metadataKey,
+        Body: JSON.stringify(meta, null, 2),
+        ContentType: "application/json"
+      })
+    );
+  }
+  result.metadata = { key: metadataKey, bytes: Buffer.byteLength(JSON.stringify(meta, null, 2)) };
+  return result;
+}
+
 function createMcpServer(req) {
   const server = new McpServer({
     name: "private-filedrop",
@@ -1282,6 +1394,15 @@ app.post("/api/chatgpt/import", requireConfiguredSecret(apiKey, "API_KEY"), requ
   try {
     const imported = await importChatGptRefs(req.body?.openaiFileIdRefs, req.body, req);
     res.status(201).json({ files: imported });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/admin/migrate-local-to-s3", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const result = await migrateLocalStorageToS3(req.body || {});
+    res.json(result);
   } catch (error) {
     next(error);
   }
