@@ -4,6 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client
@@ -153,6 +154,20 @@ async function writeFileObject(storageName, file) {
   }
 
   await fs.writeFile(path.join(filesDir, storageName), file.buffer);
+}
+
+async function deleteFileObject(storageName) {
+  if (!storageName) return;
+  if (storageDriver === "s3") {
+    await s3.send(new DeleteObjectCommand({ Bucket: s3Bucket, Key: s3Key(`files/${storageName}`) }));
+    return;
+  }
+
+  try {
+    await fs.unlink(path.join(filesDir, storageName));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
 }
 
 async function saveBufferFile({ buffer, originalname, mimetype, size }, body = {}) {
@@ -1526,6 +1541,24 @@ app.patch("/api/files/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireA
       return;
     }
     res.json(publicFile(file, req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/files/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const index = (meta.files || []).findIndex((item) => item.id === req.params.id);
+    if (index === -1) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const [file] = meta.files.splice(index, 1);
+    await deleteFileObject(file.storageName);
+    await writeMeta(meta);
+    res.json({ deleted: publicFile(file, req) });
   } catch (error) {
     next(error);
   }
