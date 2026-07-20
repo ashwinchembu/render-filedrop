@@ -52,7 +52,7 @@ The app stores file records, mailbox messages, channels, and webhook registratio
    ```
 
 4. Set `STORAGE_DRIVER=s3` and redeploy.
-5. Verify `/healthz`, `GET /api/files`, and `GET /api/messages?to=ashwin-main-codex&unreadOnly=true`.
+5. Verify `/healthz`, `GET /api/files`, and `GET /api/messages?to=desktop-client&unreadOnly=true`.
 
 Keep the disk attached until the S3-backed service has been stable for a few polling cycles. It is useful as a rollback source.
 
