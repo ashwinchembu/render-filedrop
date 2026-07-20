@@ -7,6 +7,8 @@ const port = Number(process.env.PORT || 8787);
 const secret = process.env.FILEDROP_WEBHOOK_SECRET || "";
 const inboxPath = process.env.FILEDROP_WEBHOOK_INBOX || "webhook-inbox.jsonl";
 const notificationConfigPath = process.env.FILEDROP_NOTIFICATION_CONFIG || "";
+const approvalStateDir = process.env.TELEGRAM_APPROVAL_STATE_DIR || "";
+const approvalDecisionLog = approvalStateDir ? `${approvalStateDir}/approval_decisions.jsonl` : "";
 const notifyCategories = new Set([
   "completion",
   "urgent-correction-complete",
@@ -109,6 +111,25 @@ async function notifyIfNeeded(message) {
   if (config.imessage?.enabled) await sendIMessage(config, text);
 }
 
+async function persistJobApproval(message) {
+  if (!approvalDecisionLog || message?.to !== "job-approval-worker" || message?.category !== "job-approval") return false;
+  const record = JSON.parse(message.body || "{}");
+  if (!/^(APPROVE|REJECT)$/.test(record.decision) || !/^[A-Za-z0-9._:-]+$/.test(record.approvalId || "")) {
+    throw new Error("Invalid job approval message");
+  }
+  await fs.mkdir(approvalStateDir, { recursive: true });
+  let existing = "";
+  try { existing = await fs.readFile(approvalDecisionLog, "utf8"); } catch {}
+  const duplicate = existing.split(/\r?\n/).filter(Boolean).some((line) => {
+    try {
+      const prior = JSON.parse(line);
+      return prior.approvalId === record.approvalId && prior.telegramUpdateId === record.telegramUpdateId;
+    } catch { return false; }
+  });
+  if (!duplicate) await fs.appendFile(approvalDecisionLog, `${JSON.stringify(record)}\n`);
+  return !duplicate;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method !== "POST" || req.url !== "/webhook") {
     res.writeHead(404, { "content-type": "application/json" });
@@ -134,6 +155,11 @@ const server = http.createServer(async (req, res) => {
     console.log(message.body);
     if (message.relatedUrl) console.log(`URL: ${message.relatedUrl}`);
     if (message.relatedFileId) console.log(`File: ${message.relatedFileId}`);
+    try {
+      if (await persistJobApproval(message)) console.log(`Persisted approval ${JSON.parse(message.body).approvalId}`);
+    } catch (error) {
+      console.error(`Could not persist job approval: ${error.message}`);
+    }
     await notifyIfNeeded(message);
   } else {
     console.log(rawBody);

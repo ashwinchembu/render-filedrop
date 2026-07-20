@@ -37,6 +37,9 @@ const s3Prefix = normalizeStoragePrefix(process.env.S3_PREFIX || "filedrop");
 const s3Region = process.env.S3_REGION || "us-east-1";
 const s3Endpoint = process.env.S3_ENDPOINT || undefined;
 const s3ForcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
+const telegramApprovalSecret = process.env.TELEGRAM_APPROVAL_WEBHOOK_SECRET || "";
+const telegramApprovalChatId = process.env.TELEGRAM_APPROVAL_CHAT_ID || "";
+const telegramApprovalBotToken = process.env.TELEGRAM_APPROVAL_BOT_TOKEN || "";
 
 let filesDir = path.join(storageDir, "files");
 let metaPath = path.join(storageDir, "metadata.json");
@@ -231,6 +234,40 @@ function hasValidApiKey(req) {
     return true;
   }
   return false;
+}
+
+function hasValidTelegramApprovalSecret(req) {
+  const provided = Buffer.from(req.header("x-telegram-bot-api-secret-token") || "");
+  const expected = Buffer.from(telegramApprovalSecret);
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+}
+
+async function acknowledgeTelegramApproval(callback, decision, approvalId) {
+  if (!telegramApprovalBotToken || !callback?.id) return;
+  const api = `https://api.telegram.org/bot${telegramApprovalBotToken}`;
+  const request = async (method, payload) => {
+    const response = await fetch(`${api}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) console.error(`Telegram ${method} failed: ${response.status}`);
+  };
+  await request("answerCallbackQuery", {
+    callback_query_id: callback.id,
+    text: `${decision} recorded. The application has not been submitted yet.`
+  });
+  if (callback.message?.chat?.id && callback.message?.message_id) {
+    await request("editMessageReplyMarkup", {
+      chat_id: callback.message.chat.id,
+      message_id: callback.message.message_id,
+      reply_markup: { inline_keyboard: [] }
+    });
+  }
+  await request("sendMessage", {
+    chat_id: callback.message?.chat?.id,
+    text: `${decision === "APPROVE" ? "✅ Approval" : "↩️ Rejection"} recorded for ${approvalId}. The local processor will verify the prepared form before any final submission.`
+  });
 }
 
 function publicFile(file, req) {
@@ -1573,6 +1610,46 @@ app.patch("/api/messages/:id/read", requireConfiguredSecret(apiKey, "API_KEY"), 
       return;
     }
     res.json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/telegram/job-approval", async (req, res, next) => {
+  try {
+    if (!telegramApprovalSecret) {
+      res.status(503).json({ error: "TELEGRAM_APPROVAL_WEBHOOK_SECRET is not configured" });
+      return;
+    }
+    if (!hasValidTelegramApprovalSecret(req)) {
+      res.status(401).json({ error: "Invalid Telegram webhook secret" });
+      return;
+    }
+    const callback = req.body?.callback_query;
+    const match = String(callback?.data || "").match(/^(APPROVE|REJECT):([A-Za-z0-9._:-]+)$/);
+    const chatId = String(callback?.message?.chat?.id || "");
+    if (!match || (telegramApprovalChatId && chatId !== telegramApprovalChatId)) {
+      res.status(200).json({ ok: true, ignored: true });
+      return;
+    }
+    const [, decision, approvalId] = match;
+    const event = {
+      approvalId,
+      decision,
+      decidedAt: new Date().toISOString(),
+      telegramUpdateId: req.body.update_id,
+      source: "telegram-webhook"
+    };
+    const message = await createMessage({
+      from: "telegram",
+      to: "job-approval-worker",
+      body: JSON.stringify(event),
+      project: "Job Finder",
+      category: "job-approval",
+      tags: ["telegram", "approval", decision.toLowerCase()]
+    });
+    res.status(200).json({ ok: true, messageId: message.id });
+    acknowledgeTelegramApproval(callback, decision, approvalId).catch((error) => console.error("Telegram acknowledgement failed", error));
   } catch (error) {
     next(error);
   }

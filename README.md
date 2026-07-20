@@ -144,6 +144,16 @@ Shared mailbox endpoints:
 
 Use `/api/messages` for control-plane coordination such as setup, status, blockers, and handoffs between trusted clients.
 
+### Telegram job approvals via webhook
+
+To replace Telegram `getUpdates` polling, configure the Telegram Bot API webhook to `POST /api/telegram/job-approval` and set these Render environment variables:
+
+- `TELEGRAM_APPROVAL_WEBHOOK_SECRET`: random value supplied to Telegram as `secret_token`.
+- `TELEGRAM_APPROVAL_CHAT_ID`: the single permitted Telegram chat ID.
+- `TELEGRAM_APPROVAL_BOT_TOKEN`: used only to acknowledge callbacks and remove the buttons.
+
+The endpoint accepts only `APPROVE:<approval-id>` and `REJECT:<approval-id>` callback data, validates the Telegram secret and chat, and emits a signed Filedrop `message.created` event to `job-approval-worker`. Run `npm run job-approval-receiver` on the local machine behind an authenticated Filedrop outgoing webhook/tunnel, with `TELEGRAM_APPROVAL_STATE_DIR` pointing to the job approval state directory. It writes only an idempotent approval decision; the existing local signed-in browser processor remains solely responsible for final form submission.
+
 Conversation channel endpoints:
 
 - `POST /api/channels`: create or update a channel. Body: `id`, `name`, optional `description`, `category`, `tags`.

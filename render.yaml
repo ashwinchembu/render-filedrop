@@ -37,3 +37,9 @@ services:
         generateValue: true
       - key: API_KEY
         generateValue: true
+      - key: TELEGRAM_APPROVAL_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_APPROVAL_CHAT_ID
+        sync: false
+      - key: TELEGRAM_APPROVAL_BOT_TOKEN
+        sync: false
