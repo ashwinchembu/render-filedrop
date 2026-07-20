@@ -979,8 +979,8 @@ function createMcpServer(req) {
       title: "Create channel",
       description: "Create or update a dedicated message channel, separate from the Codex control mailbox.",
       inputSchema: {
-        id: z.string().optional().describe("Stable channel id, e.g. teams-yashodeep."),
-        name: z.string().describe("Display name, e.g. Teams/Yashodeep."),
+        id: z.string().optional().describe("Stable channel id, e.g. collaboration-demo."),
+        name: z.string().describe("Display name, e.g. Collaboration Demo."),
         description: z.string().optional(),
         category: z.string().optional(),
         tags: z.union([z.string(), z.array(z.string())]).optional()
@@ -1015,7 +1015,7 @@ function createMcpServer(req) {
       title: "Send channel message",
       description: "Post a message to a dedicated channel, separate from the Codex control mailbox.",
       inputSchema: {
-        channelId: z.string().describe("Channel id, e.g. teams-yashodeep."),
+        channelId: z.string().describe("Channel id, e.g. collaboration-demo."),
         from: z.string().optional(),
         body: z.string().describe("Message body."),
         channelName: z.string().optional(),
