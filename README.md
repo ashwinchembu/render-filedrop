@@ -142,7 +142,7 @@ Shared mailbox endpoints:
 - `GET /api/messages?unreadOnly=true`: list unread messages.
 - `PATCH /api/messages/<message-id>/read`: mark a message read.
 
-Use `/api/messages` only for Codex control-plane coordination: setup, status, blockers, and handoffs between `ashwin-main-codex` and `ashwin-remote-codex`.
+Use `/api/messages` for control-plane coordination such as setup, status, blockers, and handoffs between trusted clients.
 
 Conversation channel endpoints:
 
@@ -152,14 +152,14 @@ Conversation channel endpoints:
 - `GET /api/channels/<channel-id>/messages`: list channel messages. Query filters: `from`, `since`, `unreadOnly`, `category`, `tag`.
 - `PATCH /api/channels/<channel-id>/messages/<message-id>/read`: mark a channel message read.
 
-Use channel messages for mirrored chats, Teams streams, and other non-control conversations. For the Yashodeep Teams mirror, use:
+Use channel messages for mirrored chats, collaboration streams, and other non-control conversations. For example:
 
 ```text
-channel id: teams-yashodeep
-channel name: Teams/Yashodeep
-category: teams-sync
-tags: teams,yashodeep,mirror,chat
-from: teams-yashodeep-sync
+channel id: collaboration-demo
+channel name: Collaboration Demo
+category: collaboration-sync
+tags: collaboration,mirror,chat
+from: collaboration-sync
 ```
 
 Webhook endpoints:
@@ -197,7 +197,7 @@ Register the public tunnel URL:
 curl -X POST "$BASE_URL/api/webhooks" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"ashwin-remote-codex","to":"ashwin-remote-codex","url":"https://your-tunnel.trycloudflare.com/webhook","secret":"choose-a-shared-secret"}'
+  -d '{"name":"desktop-client","to":"desktop-client","url":"https://your-tunnel.trycloudflare.com/webhook","secret":"choose-a-shared-secret"}'
 ```
 
 This receiver prints incoming events and appends them to `webhook-inbox.jsonl`.
