@@ -489,6 +489,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileRecord"
+  /api/jobs:
+    get:
+      operationId: listJobs
+      summary: List durable queue jobs.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [queued, claimed, in_progress, blocked, completed] } }
+        - { name: device, in: query, schema: { type: string } }
+        - { name: project, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Queue jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobRecord" }
+    post:
+      operationId: enqueueJob
+      summary: Enqueue or deduplicate a durable job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobCreate" }
+      responses:
+        "201": { description: Job created. }
+        "200": { description: Existing deduplicated job returned. }
+  /api/jobs/claim:
+    post:
+      operationId: claimJob
+      summary: Claim a queued job for a device and session lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device, session]
+              properties:
+                id: { type: string }
+                device: { type: string }
+                session: { type: string }
+                project: { type: string }
+                kind: { type: string }
+                leaseSeconds: { type: integer }
+      responses:
+        "200": { description: Job claimed. }
+        "204": { description: No eligible job. }
+  /api/jobs/retry-stale:
+    post:
+      operationId: retryStaleJobs
+      summary: Requeue expired leases or block exhausted jobs.
+      responses:
+        "200": { description: Recovered jobs. }
+  /api/jobs/{id}:
+    get:
+      operationId: getJob
+      summary: Get one durable queue job.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Durable job. }
+        "404": { description: Job not found. }
+    patch:
+      operationId: updateJob
+      summary: Transition an owned job and attach structured outputs.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobUpdate" }
+      responses:
+        "200": { description: Updated job. }
+  /api/jobs/{id}/heartbeat:
+    post:
+      operationId: heartbeatJob
+      summary: Renew an owned job lease.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device, session]
+              properties:
+                device: { type: string }
+                session: { type: string }
+                leaseSeconds: { type: integer }
+      responses:
+        "200": { description: Lease renewed. }
 components:
   securitySchemes:
     bearerAuth:
@@ -632,3 +730,45 @@ components:
           type: boolean
         secret:
           type: string
+    JobCreate:
+      type: object
+      required: [dedupeKey, title]
+      properties:
+        id: { type: string }
+        dedupeKey: { type: string }
+        title: { type: string }
+        kind: { type: string }
+        project: { type: string }
+        priority: { type: number }
+        maxAttempts: { type: integer }
+        staleAfterSeconds: { type: integer }
+        payload: { type: object, additionalProperties: true }
+    JobUpdate:
+      type: object
+      required: [device, session, state]
+      properties:
+        device: { type: string }
+        session: { type: string }
+        state: { type: string, enum: [queued, in_progress, blocked, completed] }
+        note: { type: string }
+        blockedReason: { type: string }
+        retryAt: { type: string, format: date-time }
+        outputs: { type: object, additionalProperties: true }
+    JobRecord:
+      type: object
+      properties:
+        id: { type: string }
+        dedupeKey: { type: string }
+        title: { type: string }
+        kind: { type: string }
+        project: { type: string }
+        state: { type: string, enum: [queued, claimed, in_progress, blocked, completed] }
+        assignedDevice: { type: string }
+        assignedSession: { type: string }
+        attempts: { type: integer }
+        maxAttempts: { type: integer }
+        lease: { type: object, additionalProperties: true }
+        outputs: { type: object, additionalProperties: true }
+        transitions: { type: array, items: { type: object, additionalProperties: true } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

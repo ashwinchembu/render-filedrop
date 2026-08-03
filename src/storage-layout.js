@@ -52,6 +52,7 @@ export function buildOrganizedMetadataObjects(metadata = {}, { generatedAt = new
   const channels = Array.isArray(metadata.channels) ? metadata.channels : [];
   const channelMessages = Array.isArray(metadata.channelMessages) ? metadata.channelMessages : [];
   const webhooks = Array.isArray(metadata.webhooks) ? metadata.webhooks : [];
+  const jobs = Array.isArray(metadata.jobs) ? metadata.jobs : [];
   const objects = [];
 
   pushJson(objects, "manifests/storage-layout.json", {
@@ -68,6 +69,8 @@ export function buildOrganizedMetadataObjects(metadata = {}, { generatedAt = new
       mailbox: "mailbox/messages.json",
       mailboxUnread: "mailbox/unread.json",
       mailboxByRecipient: "mailbox/by-recipient/{recipient}.json",
+      jobs: "queue/jobs.json",
+      jobsByState: "queue/by-state/{state}.json",
       channels: "channels/channels.json",
       channelMessages: "channels/messages.json",
       channelMessagesByChannel: "channels/by-channel/{channelId}.json",
@@ -79,6 +82,7 @@ export function buildOrganizedMetadataObjects(metadata = {}, { generatedAt = new
   pushJson(objects, "indexes/projects.json", summarizeProjects(files));
   pushJson(objects, "mailbox/messages.json", messages);
   pushJson(objects, "mailbox/unread.json", messages.filter((message) => !message.readAt));
+  pushJson(objects, "queue/jobs.json", jobs);
   pushJson(objects, "channels/channels.json", channels);
   pushJson(objects, "channels/messages.json", channelMessages);
   pushJson(objects, "webhooks/webhooks.json", webhooks);
@@ -90,6 +94,10 @@ export function buildOrganizedMetadataObjects(metadata = {}, { generatedAt = new
       `mailbox/by-recipient/${safePathSegment(recipient)}.json`,
       messages.filter((message) => (message.to || "all") === recipient)
     );
+  }
+
+  for (const state of ["queued", "claimed", "in_progress", "blocked", "completed"]) {
+    pushJson(objects, `queue/by-state/${state}.json`, jobs.filter((job) => job.state === state));
   }
 
   const channelIds = new Set([

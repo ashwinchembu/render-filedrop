@@ -1,5 +1,24 @@
 # Private Filedrop
 
+## Durable job queue
+
+Use the queue for cross-computer work. Mailbox messages remain useful for human notes, but reminders and executable work should call `enqueue_job` with a stable `dedupeKey`.
+
+Lifecycle:
+
+`queued -> claimed -> in_progress -> blocked/completed`
+
+- `enqueue_job`: creates a durable job or returns the existing job for the same dedupe key.
+- `claim_job`: atomically assigns a queued job to one device and session and starts a lease.
+- `heartbeat_job`: renews the lease while work is active.
+- `update_job`: records progress, blockage, completion, retries, and structured outputs.
+- `retry_stale_jobs`: returns expired leases to `queued`; jobs that exhaust `maxAttempts` become `blocked`.
+- `list_jobs` / `get_job`: inspect queue state, ownership, attempts, transitions, and outputs.
+
+Every completed job can return structured `links`, `files`, `screenshots`, a short `status`, and non-secret `data`. Secret-shaped fields such as passwords, tokens, cookies, credentials, API keys, OTPs, and 2FA values are rejected from payloads and outputs. Authentication must remain local to the assigned device.
+
+REST clients can use `POST /api/jobs`, `POST /api/jobs/claim`, `POST /api/jobs/:id/heartbeat`, `PATCH /api/jobs/:id`, `POST /api/jobs/retry-stale`, and `GET /api/jobs`.
+
 A tiny Render-hosted file bridge for moving files between computers.
 
 ## Features

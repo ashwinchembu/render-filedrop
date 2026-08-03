@@ -22,6 +22,14 @@ import {
   normalizeStoragePrefix,
   storageObjectKey
 } from "./storage-layout.js";
+import {
+  claimJob,
+  enqueueJob,
+  heartbeatJob,
+  listJobs,
+  recoverStaleJobs,
+  transitionJob
+} from "./job-queue.js";
 
 const app = express();
 app.set("trust proxy", true);
@@ -147,6 +155,19 @@ async function writeMeta(meta) {
   const tempPath = `${metaPath}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(tempPath, JSON.stringify(meta, null, 2));
   await fs.rename(tempPath, metaPath);
+}
+
+let jobMutation = Promise.resolve();
+
+async function mutateJobs(mutator) {
+  const run = jobMutation.then(async () => {
+    const meta = await readMeta();
+    const result = await mutator(meta);
+    await writeMeta(meta);
+    return result;
+  });
+  jobMutation = run.catch(() => {});
+  return run;
 }
 
 async function writeFileObject(storageName, file) {
@@ -1155,6 +1176,141 @@ function createMcpServer(req) {
     }
   );
 
+  const jobPayloadSchema = z.record(z.string(), z.unknown()).optional();
+  const jobOwnerSchema = {
+    id: z.string().describe("Durable job ID."),
+    device: z.string().describe("Assigned device identity."),
+    session: z.string().describe("Assigned Codex/session identity.")
+  };
+
+  server.registerTool(
+    "enqueue_job",
+    {
+      title: "Enqueue durable job",
+      description: "Create one deduplicated durable job. Credentials and secret-shaped fields are rejected.",
+      inputSchema: {
+        id: z.string().optional().describe("Optional caller-provided durable job ID."),
+        dedupeKey: z.string().describe("Stable idempotency key; reminders with this key return the existing job."),
+        title: z.string().describe("Human-readable job title."),
+        kind: z.string().optional(),
+        project: z.string().optional(),
+        priority: z.number().optional(),
+        payload: jobPayloadSchema,
+        createdBy: z.string().optional(),
+        maxAttempts: z.number().int().positive().optional(),
+        staleAfterSeconds: z.number().int().positive().optional()
+      }
+    },
+    async (input) => {
+      const result = await mutateJobs((meta) => enqueueJob(meta, input));
+      const verb = result.created ? "Enqueued" : "Deduplicated";
+      return mcpTextAndStructured(`${verb} job ${result.job.id}.`, result);
+    }
+  );
+
+  server.registerTool(
+    "list_jobs",
+    {
+      title: "List queued jobs",
+      description: "List durable jobs by lifecycle state, owner, project, or kind.",
+      inputSchema: {
+        state: z.enum(["queued", "claimed", "in_progress", "blocked", "completed"]).optional(),
+        device: z.string().optional(),
+        project: z.string().optional(),
+        kind: z.string().optional()
+      }
+    },
+    async (input) => {
+      const meta = await readMeta();
+      const jobs = listJobs(meta, input);
+      const text = jobs.length
+        ? jobs.map((job) => `${job.id} | ${job.state} | ${job.assignedDevice || "unassigned"} | ${job.title}`).join("\n")
+        : "No jobs found.";
+      return mcpTextAndStructured(text, { jobs });
+    }
+  );
+
+  server.registerTool(
+    "get_job",
+    {
+      title: "Get durable job",
+      description: "Get one job including transitions, lease, attempts, and structured outputs.",
+      inputSchema: { id: z.string() }
+    },
+    async ({ id }) => {
+      const meta = await readMeta();
+      const job = listJobs(meta).find((candidate) => candidate.id === id);
+      if (!job) throw Object.assign(new Error("Job not found"), { statusCode: 404 });
+      return mcpTextAndStructured(`${job.id} is ${job.state}.`, { job });
+    }
+  );
+
+  server.registerTool(
+    "claim_job",
+    {
+      title: "Claim next job",
+      description: "Atomically claim a queued job for one device/session and start its lease.",
+      inputSchema: {
+        id: z.string().optional(),
+        device: z.string(),
+        session: z.string(),
+        kind: z.string().optional(),
+        project: z.string().optional(),
+        leaseSeconds: z.number().int().positive().optional()
+      }
+    },
+    async (input) => {
+      const job = await mutateJobs((meta) => claimJob(meta, input));
+      return mcpTextAndStructured(job ? `Claimed job ${job.id}.` : "No eligible queued job.", { job });
+    }
+  );
+
+  server.registerTool(
+    "heartbeat_job",
+    {
+      title: "Heartbeat claimed job",
+      description: "Renew the lease for a claimed or in-progress job.",
+      inputSchema: { ...jobOwnerSchema, leaseSeconds: z.number().int().positive().optional() }
+    },
+    async (input) => {
+      const job = await mutateJobs((meta) => heartbeatJob(meta, input));
+      return mcpTextAndStructured(`Heartbeat renewed for ${job.id} until ${job.lease.expiresAt}.`, { job });
+    }
+  );
+
+  server.registerTool(
+    "update_job",
+    {
+      title: "Update job state",
+      description: "Move an owned job through in_progress, blocked, completed, or queued retry states with structured outputs.",
+      inputSchema: {
+        ...jobOwnerSchema,
+        state: z.enum(["queued", "in_progress", "blocked", "completed"]),
+        note: z.string().optional(),
+        blockedReason: z.string().optional(),
+        retryAt: z.string().optional(),
+        outputs: jobPayloadSchema
+      }
+    },
+    async (input) => {
+      const job = await mutateJobs((meta) => transitionJob(meta, input));
+      return mcpTextAndStructured(`Job ${job.id} is now ${job.state}.`, { job });
+    }
+  );
+
+  server.registerTool(
+    "retry_stale_jobs",
+    {
+      title: "Retry stale jobs",
+      description: "Recover expired claimed/in-progress leases or block jobs that exhausted attempts.",
+      inputSchema: {}
+    },
+    async () => {
+      const jobs = await mutateJobs((meta) => recoverStaleJobs(meta));
+      return mcpTextAndStructured(`Recovered ${jobs.length} stale job(s).`, { jobs });
+    }
+  );
+
   server.registerTool(
     "register_webhook",
     {
@@ -1610,6 +1766,76 @@ app.patch("/api/messages/:id/read", requireConfiguredSecret(apiKey, "API_KEY"), 
       return;
     }
     res.json(publicMessage(message));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/jobs", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    res.json({ jobs: listJobs(meta, {
+      state: cleanText(req.query.state, 40),
+      device: cleanText(req.query.device, 200),
+      project: cleanText(req.query.project, 200),
+      kind: cleanText(req.query.kind, 120)
+    }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/jobs/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const meta = await readMeta();
+    const job = listJobs(meta).find((candidate) => candidate.id === req.params.id);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    res.json({ job });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/jobs", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const result = await mutateJobs((meta) => enqueueJob(meta, req.body));
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/jobs/claim", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const job = await mutateJobs((meta) => claimJob(meta, req.body));
+    res.status(job ? 200 : 204).json(job ? { job } : undefined);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/jobs/retry-stale", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (_req, res, next) => {
+  try {
+    const jobs = await mutateJobs((meta) => recoverStaleJobs(meta));
+    res.json({ jobs });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/jobs/:id/heartbeat", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const job = await mutateJobs((meta) => heartbeatJob(meta, { ...req.body, id: req.params.id }));
+    res.json({ job });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/jobs/:id", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
+  try {
+    const job = await mutateJobs((meta) => transitionJob(meta, { ...req.body, id: req.params.id }));
+    res.json({ job });
   } catch (error) {
     next(error);
   }
