@@ -17,6 +17,8 @@ Lifecycle:
 
 Every completed job can return structured `links`, `files`, `screenshots`, a short `status`, and non-secret `data`. Secret-shaped fields such as passwords, tokens, cookies, credentials, API keys, OTPs, and 2FA values are rejected from payloads and outputs. Authentication must remain local to the assigned device.
 
+Canonical device identities are enforced across the queue: `ashwin-main-codex` (MacBook), `ashwin-mac-mini-codex` (Mac mini), and `ashwin-remote-codex` (remote computer). Known legacy aliases are normalized when jobs are enqueued or claimed; unknown device names are rejected.
+
 REST clients can use `POST /api/jobs`, `POST /api/jobs/claim`, `POST /api/jobs/:id/heartbeat`, `PATCH /api/jobs/:id`, `POST /api/jobs/retry-stale`, and `GET /api/jobs`.
 
 A tiny Render-hosted file bridge for moving files between computers.

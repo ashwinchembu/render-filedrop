@@ -1,6 +1,19 @@
 import crypto from "node:crypto";
 
 export const JOB_STATES = ["queued", "claimed", "in_progress", "blocked", "completed"];
+export const DEVICE_IDS = ["ashwin-main-codex", "ashwin-mac-mini-codex", "ashwin-remote-codex"];
+
+const DEVICE_ALIASES = new Map([
+  ["ashwin-main-codex", "ashwin-main-codex"],
+  ["main-codex", "ashwin-main-codex"],
+  ["macbook-codex", "ashwin-main-codex"],
+  ["ashwin-macbook-codex", "ashwin-main-codex"],
+  ["ashwin-mac-mini-codex", "ashwin-mac-mini-codex"],
+  ["mac-mini-codex", "ashwin-mac-mini-codex"],
+  ["macmini-codex", "ashwin-mac-mini-codex"],
+  ["ashwin-remote-codex", "ashwin-remote-codex"],
+  ["remote-codex", "ashwin-remote-codex"]
+]);
 
 const TERMINAL_STATES = new Set(["completed"]);
 const TRANSITIONS = {
@@ -18,6 +31,18 @@ function iso(now = new Date()) {
 
 function clean(value, max = 500) {
   return String(value || "").trim().slice(0, max);
+}
+
+export function canonicalDeviceId(value, { required = true } = {}) {
+  const supplied = clean(value, 200).toLowerCase();
+  if (!supplied && !required) return "";
+  const canonical = DEVICE_ALIASES.get(supplied);
+  if (!canonical) {
+    const error = new Error(`Unknown device identity. Use one of: ${DEVICE_IDS.join(", ")}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return canonical;
 }
 
 function positiveInteger(value, fallback, max = Number.MAX_SAFE_INTEGER) {
@@ -84,6 +109,8 @@ export function enqueueJob(meta, input = {}, now = new Date()) {
     throw error;
   }
   assertNoSecrets(input.payload || {}, "payload");
+  const payload = input.payload && typeof input.payload === "object" ? structuredClone(input.payload) : {};
+  if (payload.targetDevice) payload.targetDevice = canonicalDeviceId(payload.targetDevice);
   const existing = jobs.find((job) => job.id === durableId || job.dedupeKey === dedupeKey);
   if (existing) return { job: existing, created: false };
 
@@ -97,7 +124,7 @@ export function enqueueJob(meta, input = {}, now = new Date()) {
     project: clean(input.project, 200),
     priority: Math.max(0, Math.min(100, Number(input.priority) || 0)),
     state: "queued",
-    payload: input.payload && typeof input.payload === "object" ? input.payload : {},
+    payload,
     assignedDevice: "",
     assignedSession: "",
     lease: { claimedAt: "", heartbeatAt: "", expiresAt: "", seconds: 0 },
@@ -145,7 +172,7 @@ export function recoverStaleJobs(meta, now = new Date()) {
 export function claimJob(meta, input = {}, now = new Date()) {
   recoverStaleJobs(meta, now);
   const jobs = ensureJobStore(meta);
-  const device = clean(input.device, 200);
+  const device = canonicalDeviceId(input.device);
   const session = clean(input.session, 240);
   if (!device || !session) {
     const error = new Error("device and session are required to claim a job");
@@ -191,7 +218,8 @@ function ownedJob(meta, input) {
     error.statusCode = 409;
     throw error;
   }
-  if (job.assignedDevice && (job.assignedDevice !== clean(input.device, 200) || job.assignedSession !== clean(input.session, 240))) {
+  const device = canonicalDeviceId(input.device);
+  if (job.assignedDevice && (job.assignedDevice !== device || job.assignedSession !== clean(input.session, 240))) {
     const error = new Error("Job is owned by another device/session");
     error.statusCode = 409;
     throw error;
@@ -227,7 +255,7 @@ export function transitionJob(meta, input = {}, now = new Date()) {
   job.state = next;
   job.outputs = input.outputs ? normalizeArtifacts(input.outputs) : job.outputs;
   job.blockedReason = next === "blocked" ? clean(input.blockedReason, 2000) : "";
-  job.transitions.push(event(next, `${clean(input.device, 200)}/${clean(input.session, 240)}`, at, input.note || job.blockedReason));
+  job.transitions.push(event(next, `${canonicalDeviceId(input.device)}/${clean(input.session, 240)}`, at, input.note || job.blockedReason));
   job.updatedAt = at;
   if (next === "queued") {
     job.retryAt = clean(input.retryAt, 80) || at;

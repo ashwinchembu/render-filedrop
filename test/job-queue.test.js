@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canonicalDeviceId,
   claimJob,
   enqueueJob,
   heartbeatJob,
@@ -20,22 +21,36 @@ test("deduplicates reminders by stable key", () => {
   assert.equal(meta.jobs.length, 1);
 });
 
+test("standardizes device names and rejects unknown identities", () => {
+  assert.equal(canonicalDeviceId("mac-mini-codex"), "ashwin-mac-mini-codex");
+  assert.equal(canonicalDeviceId("macbook-codex"), "ashwin-main-codex");
+  assert.equal(canonicalDeviceId("remote-codex"), "ashwin-remote-codex");
+  assert.throws(() => canonicalDeviceId("mystery-computer"), /Unknown device identity/);
+  const meta = {};
+  const { job } = enqueueJob(meta, {
+    dedupeKey: "alias-target",
+    title: "Alias target",
+    payload: { targetDevice: "mac-mini-codex" }
+  }, t0);
+  assert.equal(job.payload.targetDevice, "ashwin-mac-mini-codex");
+});
+
 test("enforces claim ownership, heartbeats, and lifecycle", () => {
   const meta = {};
   const { job } = enqueueJob(meta, { id: "job-1", dedupeKey: "job-1", title: "Test" }, t0);
-  claimJob(meta, { id: job.id, device: "mac-mini", session: "session-a", leaseSeconds: 60 }, t0);
+  claimJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "session-a", leaseSeconds: 60 }, t0);
   assert.equal(job.state, "claimed");
-  transitionJob(meta, { id: job.id, device: "mac-mini", session: "session-a", state: "in_progress" }, t0);
+  transitionJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "session-a", state: "in_progress" }, t0);
   const heartbeatAt = new Date(t0.getTime() + 30_000);
-  heartbeatJob(meta, { id: job.id, device: "mac-mini", session: "session-a", leaseSeconds: 120 }, heartbeatAt);
+  heartbeatJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "session-a", leaseSeconds: 120 }, heartbeatAt);
   assert.equal(job.lease.expiresAt, "2026-08-03T20:02:30.000Z");
   assert.throws(
-    () => transitionJob(meta, { id: job.id, device: "macbook", session: "session-b", state: "completed" }),
+    () => transitionJob(meta, { id: job.id, device: "ashwin-main-codex", session: "session-b", state: "completed" }),
     /owned by another/
   );
   transitionJob(meta, {
     id: job.id,
-    device: "mac-mini",
+    device: "ashwin-mac-mini-codex",
     session: "session-a",
     state: "completed",
     outputs: {
@@ -52,10 +67,10 @@ test("enforces claim ownership, heartbeats, and lifecycle", () => {
 test("recovers stale leases and blocks exhausted attempts", () => {
   const meta = {};
   const { job } = enqueueJob(meta, { id: "retry-job", dedupeKey: "retry-job", maxAttempts: 2 }, t0);
-  claimJob(meta, { id: job.id, device: "remote", session: "one", leaseSeconds: 1 }, t0);
+  claimJob(meta, { id: job.id, device: "ashwin-remote-codex", session: "one", leaseSeconds: 1 }, t0);
   let recovered = recoverStaleJobs(meta, new Date(t0.getTime() + 2_000));
   assert.equal(recovered[0].state, "queued");
-  claimJob(meta, { id: job.id, device: "remote", session: "two", leaseSeconds: 1 }, new Date(t0.getTime() + 3_000));
+  claimJob(meta, { id: job.id, device: "ashwin-remote-codex", session: "two", leaseSeconds: 1 }, new Date(t0.getTime() + 3_000));
   recovered = recoverStaleJobs(meta, new Date(t0.getTime() + 5_000));
   assert.equal(recovered[0].state, "blocked");
   assert.match(job.blockedReason, /maximum attempts/);
@@ -68,10 +83,10 @@ test("rejects credentials in payloads and outputs", () => {
   );
   const meta = {};
   const { job } = enqueueJob(meta, { id: "safe", dedupeKey: "safe" }, t0);
-  claimJob(meta, { id: job.id, device: "mini", session: "s" }, t0);
-  transitionJob(meta, { id: job.id, device: "mini", session: "s", state: "in_progress" }, t0);
+  claimJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "s" }, t0);
+  transitionJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "s", state: "in_progress" }, t0);
   assert.throws(
-    () => transitionJob(meta, { id: job.id, device: "mini", session: "s", state: "completed", outputs: { data: { password: "no" } } }),
+    () => transitionJob(meta, { id: job.id, device: "ashwin-mac-mini-codex", session: "s", state: "completed", outputs: { data: { password: "no" } } }),
     /Credentials are not allowed/
   );
 });
