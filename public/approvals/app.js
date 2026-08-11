@@ -81,6 +81,7 @@ function draftsFor(conversation) {
   const person = conversation.person.toLowerCase();
   const suggested = normalizeDraftBubbles(conversation.suggestedDrafts || []);
   const formalCachedDraft = /\bunderstood\b|purposeful|fully formatted|communicated the timing|firm ETA/i.test(suggested.join(" "));
+  if (person.includes("kilian") && /we(?:'re| are) good for now|no follow[- ]?up|nothing else needed/i.test(latest)) return ["sounds good"];
   if (suggested.length && !(person.includes("kilian") && formalCachedDraft)) return suggested;
   if (person.includes("kilian")) return ["yeah i get what u mean", "i’ll clean it up and make sure it’s actually client ready"];
   if (person.includes("yashodeep")) return ["i’ve reviewed the request and i’m working from the latest source", "i’ll send the validated result with the exact file or query location once the final check is complete"];
