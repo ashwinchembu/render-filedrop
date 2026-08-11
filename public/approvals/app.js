@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], sentDraftKeys: new Set() };
+const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], sentDraftKeys: new Set(), generation: null };
 
 const escapeHtml = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const initials = (name) => name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
@@ -159,6 +159,14 @@ function attachPendingSends() {
   state.pendingSends = stillPending;
 }
 
+function setGenerationBusy(busy, text = "Generating updated messages…") {
+  const status = $("#generation-status");
+  status.hidden = !busy;
+  status.querySelector("strong").textContent = text;
+  $("#regenerate").disabled = busy;
+  $("#generate-quick").disabled = busy;
+}
+
 function renderConversationList() {
   const query = $("#search").value.trim().toLowerCase();
   const visible = state.conversations.filter((item) => state.filter === "all" || item.unread > 0).filter((item) => !query || `${item.person} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(query));
@@ -211,6 +219,15 @@ async function refresh() {
     const pushedPeople = new Set(pushed.map((item) => item.person.toLowerCase()));
     state.conversations = [...pushed, ...legacy.filter((item) => !pushedPeople.has(item.person.toLowerCase()))];
     attachPendingSends();
+    if (state.generation) {
+      const generatedConversation = state.conversations.find((item) => item.id === state.generation.conversationId);
+      const signature = JSON.stringify(generatedConversation?.suggestedDrafts || []);
+      if (signature && signature !== state.generation.beforeSignature) {
+        state.generation = null;
+        setGenerationBusy(false);
+        setNotice("Generated messages are ready to review");
+      }
+    }
     if (!state.conversations.some((item) => item.id === state.activeId)) state.activeId = state.conversations[0]?.id || "";
     $("#status").classList.add("connected");
     if ($("#auth-modal").open) $("#auth-modal").close();
@@ -248,21 +265,36 @@ $("#search").addEventListener("input", renderConversationList);
 document.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderConversationList(); }));
 function openDraftModal() {
   $("#draft-direction").value = $("#draft-direction-quick").value;
-  $("#draft-modal").showModal();
+  renderDrafts(state.drafts);
+  if (!$("#draft-modal").open) $("#draft-modal").showModal();
   $("#draft-direction").focus();
 }
 async function requestRegeneration(direction) {
   const item = active();
   if (!item) return;
   if (!direction) { setNotice("Describe what you want to say first", true); $("#draft-direction-quick").focus(); return; }
+  $("#draft-direction-quick").value = direction;
+  openDraftModal();
+  state.generation = { conversationId: item.id, beforeSignature: JSON.stringify(item.suggestedDrafts || []) };
+  setGenerationBusy(true);
   const latestInbound = item.messages.filter((message) => message.direction === "inbound").at(-1);
   try {
     const response = await fetch("/approvals/api/regenerate", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, conversationId: item.id, sourceMessageId: latestInbound?.id || "", latestInboundText: latestInbound?.text || "", direction }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not generate messages");
     setNotice(`Generating updated messages for ${item.person}…`);
-    window.setTimeout(refresh, 4000);
-  } catch (error) { setNotice(error.message, true); }
+    window.setTimeout(refresh, 3000);
+    window.setTimeout(refresh, 7000);
+    window.setTimeout(refresh, 14000);
+    window.setTimeout(refresh, 25000);
+    const generationRequest = state.generation;
+    window.setTimeout(() => {
+      if (state.generation !== generationRequest) return;
+      state.generation = null;
+      setGenerationBusy(false);
+      setNotice("The generator is still working. You can keep editing the current messages.");
+    }, 30000);
+  } catch (error) { state.generation = null; setGenerationBusy(false); setNotice(error.message, true); }
 }
 $("#generate-quick").addEventListener("click", () => requestRegeneration($("#draft-direction-quick").value.trim()));
 $("#draft-direction-quick").addEventListener("keydown", (event) => { if (event.key === "Enter") requestRegeneration($("#draft-direction-quick").value.trim()); });
