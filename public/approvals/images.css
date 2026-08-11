@@ -10,3 +10,9 @@
 .sensitive-banner div { display: grid; gap: 2px; }
 .sensitive-banner strong { font-size: 11px; }
 .sensitive-banner small { font-size: 10px; line-height: 1.4; }
+.reply-list { display: grid; gap: 9px; margin-top: 7px; }
+.reply-item { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr) 24px; gap: 7px; align-items: start; }
+.reply-item textarea { margin: 0; min-height: 78px; resize: vertical; }
+.reply-number { width: 24px; height: 24px; margin-top: 8px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--teams); font-size: 10px; font-weight: 800; }
+.remove-message { width: 24px; height: 24px; margin-top: 8px; padding: 0; border: 1px solid #e2c4c4; border-radius: 50%; background: #fff; color: #a32626; line-height: 1; }
+.add-message { margin-top: 9px; padding: 7px 10px; border: 1px dashed #b9bbd8; border-radius: 8px; background: #f8f8fd; color: var(--teams); font-size: 11px; font-weight: 700; }

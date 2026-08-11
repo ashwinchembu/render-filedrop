@@ -1591,12 +1591,15 @@ app.post(
   async (req, res, next) => {
     try {
       const recipient = cleanText(req.body?.recipient, 120);
-      const draft = cleanText(req.body?.draft, 4000);
+      const drafts = (Array.isArray(req.body?.drafts) ? req.body.drafts : [req.body?.draft])
+        .map((draft) => cleanText(draft, 4000))
+        .filter(Boolean)
+        .slice(0, 12);
       const sourceMessageIds = Array.isArray(req.body?.sourceMessageIds)
         ? req.body.sourceMessageIds.map((id) => cleanText(id, 80)).filter(Boolean)
         : [];
-      if (!recipient || !draft) {
-        res.status(400).json({ error: "Recipient and draft are required" });
+      if (!recipient || !drafts.length) {
+        res.status(400).json({ error: "Recipient and at least one message are required" });
         return;
       }
       const message = await createMessage({
@@ -1605,7 +1608,7 @@ app.post(
         project: "Mindsight Campaign Implementation",
         category: "APPROVED_SEND",
         tags: ["teams", "approval-desk", "user-approved"],
-        body: `User approved in Teams Approval Desk. Send this exact reply to ${recipient} in Teams now:\n\n"${draft}"\n\nReply with exact sent text and timestamp. Source FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
+        body: `User approved ${drafts.length} separate Teams message${drafts.length === 1 ? "" : "s"} for ${recipient}. Send each MESSAGE below as its own Teams bubble, in order, without combining or rewriting:\n\n${drafts.map((draft, index) => `MESSAGE ${index + 1}:\n"${draft}"`).join("\n\n")}\n\nReply with every exact sent bubble and timestamp. Source FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
       });
       res.status(201).json({ ok: true, messageId: message.id });
     } catch (error) {
