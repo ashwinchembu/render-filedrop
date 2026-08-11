@@ -7,13 +7,13 @@
     <title>Teams Approval Desk</title>
     <link rel="stylesheet" href="/approvals/style.css" />
     <link rel="stylesheet" href="/approvals/images.css" />
+    <link rel="stylesheet" href="/approvals/auth.css" />
   </head>
   <body>
     <main class="shell">
       <nav class="rail" aria-label="Primary navigation"><div class="logo">A</div><button class="rail-button active">▣<small>Inbox</small></button><span class="spacer"></span><div class="avatar">AC</div></nav>
       <section class="inbox">
         <header><div><p class="eyebrow">TEAMS APPROVAL DESK</p><h1>Messages</h1></div><button id="refresh" class="icon" aria-label="Refresh messages">↻</button></header>
-        <div class="auth"><input id="password" type="password" autocomplete="current-password" placeholder="FileDrop password" aria-label="FileDrop password" /><button id="connect">Connect once</button></div>
         <label class="search">⌕ <input id="search" placeholder="Search people or messages" aria-label="Search people or messages" /></label>
         <div class="filters"><button data-filter="unread" class="active">Unread</button><button data-filter="all">All</button><span id="waiting">0 waiting</span></div>
         <div id="conversations" class="conversation-list"><p class="empty">Checking your secure session…</p></div>
@@ -42,6 +42,17 @@
         <p id="notice" class="notice" hidden></p>
       </aside>
     </main>
+    <dialog id="auth-modal" class="auth-modal">
+      <div class="auth-modal-icon">A</div>
+      <p class="eyebrow">SECURE ACCESS</p>
+      <h2>Connect Approval Desk</h2>
+      <p>Enter the FileDrop password once. This browser will stay connected securely for 30 days.</p>
+      <label for="password">FileDrop password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="FileDrop password" />
+      <p id="auth-error" class="auth-error" hidden></p>
+      <button id="connect" type="button">Connect for 30 days</button>
+      <small>The password is verified by FileDrop and is never saved in this page, Git, or a skill file.</small>
+    </dialog>
     <script src="/approvals/app.js" defer></script>
   </body>
 </html>

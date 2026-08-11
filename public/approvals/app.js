@@ -98,6 +98,12 @@ function renderDrafts(drafts) {
   updateCount();
 }
 function setNotice(text, error = false) { const node = $("#notice"); node.hidden = !text; node.textContent = text; node.style.background = error ? "#fff0e9" : "#dff7ee"; node.style.color = error ? "#99462f" : "#126d58"; }
+function openAuthModal(message = "") {
+  $("#auth-error").textContent = message;
+  $("#auth-error").hidden = !message;
+  if (!$("#auth-modal").open) $("#auth-modal").showModal();
+  $("#password").focus();
+}
 
 function renderConversationList() {
   const query = $("#search").value.trim().toLowerCase();
@@ -149,7 +155,7 @@ async function refresh() {
     state.conversations = [...pushed, ...legacy.filter((item) => !pushedPeople.has(item.person.toLowerCase()))];
     if (!state.conversations.some((item) => item.id === state.activeId)) state.activeId = state.conversations[0]?.id || "";
     $("#status").classList.add("connected");
-    $(".auth").hidden = true;
+    if ($("#auth-modal").open) $("#auth-modal").close();
     $("#status strong").textContent = "FileDrop connected";
     $("#status small").textContent = `last checked ${displayTime(payload.syncedAt)}`;
     renderConversationList();
@@ -158,7 +164,7 @@ async function refresh() {
     $("#status").classList.remove("connected");
     $("#status strong").textContent = "Connection failed";
     $("#status small").textContent = error.message;
-    if (/invalid upload password/i.test(error.message)) $(".auth").hidden = false;
+    if (/invalid upload password/i.test(error.message)) openAuthModal();
   } finally { $("#refresh").disabled = false; }
 }
 
@@ -169,12 +175,13 @@ $("#connect").addEventListener("click", async () => {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not connect");
     $("#password").value = "";
-    $(".auth").hidden = true;
+    $("#auth-modal").close();
     await refresh();
   } catch (error) {
     $("#status").classList.remove("connected");
     $("#status strong").textContent = "Connection failed";
     $("#status small").textContent = error.message;
+    openAuthModal(error.message);
   }
 });
 $("#password").addEventListener("keydown", (event) => { if (event.key === "Enter") $("#connect").click(); });
