@@ -1,6 +1,11 @@
-.draft-preview { display: grid; gap: 8px; margin: 8px 0 12px; }
+.draft .work-context { margin: 18px 0 14px; }
+.draft-preview { display: grid; gap: 7px; margin: 0 0 16px; }
 .draft-preview-bubble { padding: 11px 13px; border-radius: 12px 5px 12px 12px; background: var(--teams); color: #fff; font-size: 13px; line-height: 1.4; }
+.quick-prompt-label { display: block; margin: 2px 0 6px; }
+.quick-prompt { width: 100%; height: 40px; margin-bottom: 9px; padding: 0 11px; border: 1px solid #d9daea; border-radius: 9px; outline: 0; }
+.quick-prompt:focus { border-color: var(--teams); box-shadow: 0 0 0 3px #5b5fc722; }
 .edit-draft { width: 100%; height: 40px; border: 1px solid #d9daea; border-radius: 9px; background: #fff; color: var(--teams); font-size: 12px; font-weight: 750; }
+.draft .tools { margin: 8px 0 14px; justify-content: flex-end; }
 .draft-modal { width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px)); padding: 24px; border: 0; border-radius: 18px; box-shadow: 0 24px 80px #20223855; color: var(--ink); overflow: auto; }
 .draft-modal::backdrop { background: #25263899; backdrop-filter: blur(5px); }
 .draft-modal header { display: flex; align-items: flex-start; justify-content: space-between; }

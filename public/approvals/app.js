@@ -214,7 +214,14 @@ $("#password").addEventListener("keydown", (event) => { if (event.key === "Enter
 $("#refresh").addEventListener("click", refresh);
 $("#search").addEventListener("input", renderConversationList);
 document.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderConversationList(); }));
-$("#edit-draft").addEventListener("click", () => $("#draft-modal").showModal());
+function openDraftModal() {
+  $("#draft-direction").value = $("#draft-direction-quick").value;
+  $("#draft-modal").showModal();
+  $("#draft-direction").focus();
+}
+$("#edit-draft").addEventListener("click", openDraftModal);
+$("#draft-direction-quick").addEventListener("keydown", (event) => { if (event.key === "Enter") openDraftModal(); });
+$("#draft-direction").addEventListener("input", () => { $("#draft-direction-quick").value = $("#draft-direction").value; });
 $("#close-draft").addEventListener("click", () => $("#draft-modal").close());
 $("#save-draft").addEventListener("click", () => { renderDrafts(state.drafts); $("#draft-modal").close(); });
 $("#add-message").addEventListener("click", () => renderDrafts([...state.drafts, ""]));
