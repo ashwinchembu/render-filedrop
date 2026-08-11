@@ -28,16 +28,16 @@
         <div class="locked">Replies are sent only after approval <span>🔒</span></div>
       </section>
       <aside class="draft">
-        <header><div><p class="eyebrow">READY TO SEND</p><h2>Suggested reply</h2></div><span class="badge">Project aware</span></header>
+        <header><div><p class="eyebrow">READY TO REVIEW</p><h2>Draft messages</h2></div><span class="badge">Context checked</span></header>
         <div class="work-context"><span>Latest verified work context</span><p id="work-context">Waiting for the Windows monitor to provide current task context.</p></div>
         <div id="draft-preview" class="draft-preview"></div>
-        <label class="quick-prompt-label" for="draft-direction-quick">what do u want to say?</label>
-        <input id="draft-direction-quick" class="quick-prompt" type="text" placeholder="type it casually" />
-        <button id="edit-draft" class="edit-draft" type="button">Edit or regenerate</button>
+        <label class="quick-prompt-label" for="draft-direction-quick">What do you want to say?</label>
+        <input id="draft-direction-quick" class="quick-prompt" type="text" placeholder="Describe the reply in your own words" />
+        <button id="generate-quick" class="edit-draft" type="button">Generate messages</button>
         <div class="tools"><span id="count">0 messages</span></div>
-        <div class="approval"><b>✓</b><div><strong>Your approval is required</strong><p>This queues the exact text for the Windows computer. It never sends automatically.</p></div></div>
-        <button id="approve" class="approve" disabled>Approve &amp; send in Teams</button>
-        <button id="hold" class="hold">Hold for later</button>
+        <div class="approval"><b>✓</b><div><strong>You control what is sent</strong><p>Nothing is sent until you approve it.</p></div></div>
+        <button id="approve" class="approve" disabled>Send all in Teams</button>
+        <button id="hold" class="hold">Save for later</button>
         <p id="notice" class="notice" hidden></p>
       </aside>
     </main>
@@ -53,14 +53,14 @@
       <small>The password is verified by FileDrop and is never saved in this page, Git, or a skill file.</small>
     </dialog>
     <dialog id="draft-modal" class="draft-modal">
-      <header><div><p class="eyebrow">MESSAGE DRAFT</p><h2>Edit reply</h2></div><button id="close-draft" class="modal-close" aria-label="Close">×</button></header>
-      <p class="modal-help">Keep each thought short. Press Enter or end a sentence to make a new Teams message.</p>
-      <label for="draft-direction">What do u want to say?</label>
-      <textarea id="draft-direction" class="draft-direction" rows="2" placeholder="ex: say i get what he means and im cleaning it up"></textarea>
+      <header><div><p class="eyebrow">MESSAGE DRAFT</p><h2>Edit messages</h2></div><button id="close-draft" class="modal-close" aria-label="Close">×</button></header>
+      <p class="modal-help">Keep each thought short. Press Enter or finish a sentence to create a separate Teams message.</p>
+      <label for="draft-direction">What do you want to say?</label>
+      <textarea id="draft-direction" class="draft-direction" rows="2" placeholder="Describe the reply in your own words"></textarea>
       <div class="draft-modal-row"><label>Edit each message</label><span id="modal-count">0 messages</span></div>
       <div id="reply-list" class="reply-list"></div>
       <button id="add-message" class="add-message" type="button">＋ Add message</button>
-      <div class="modal-actions"><button id="regenerate" class="regenerate">↺ Regenerate</button><button id="save-draft" class="save-draft">Done</button></div>
+      <div class="modal-actions"><button id="regenerate" class="regenerate">Generate messages</button><button id="save-draft" class="save-draft">Save changes</button></div>
     </dialog>
     <script src="/approvals/app.js" defer></script>
   </body>
