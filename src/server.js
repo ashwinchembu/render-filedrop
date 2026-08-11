@@ -1826,7 +1826,25 @@ app.post(
         project: "Mindsight Campaign Implementation",
         category: "DRAFT_REGENERATE",
         tags: ["teams", "approval-desk", "context-refresh", "write-like-ashwin"],
-        body: JSON.stringify({ version: 1, type: "teams_draft_regenerate", requestId, recipient, conversationId, sourceMessageId, latestInboundText, direction })
+        body: JSON.stringify({
+          version: 1,
+          type: "teams_draft_regenerate",
+          requestId,
+          recipient,
+          conversationId,
+          sourceMessageId,
+          latestInboundText,
+          direction,
+          draftStyle: {
+            voice: "write-like-ashwin",
+            lowercase: true,
+            short: true,
+            oneThoughtPerBubble: true,
+            omitTerminalPeriods: true,
+            splitSentencesIntoSeparateDrafts: true,
+            avoidFormalOrCorporateLanguage: true
+          }
+        })
       });
       res.status(202).json({ ok: true, requestId });
     } catch (error) {

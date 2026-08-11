@@ -77,10 +77,10 @@ function makeConversations(rows, structured = false) {
 
 function draftsFor(conversation) {
   if (!conversation) return [];
-  if (conversation.suggestedDrafts?.length) return conversation.suggestedDrafts;
+  if (conversation.suggestedDrafts?.length) return normalizeDraftBubbles(conversation.suggestedDrafts);
   const latest = conversation.messages.filter((m) => m.direction === "inbound").at(-1)?.text.toLowerCase() || "";
   const person = conversation.person.toLowerCase();
-  if (person.includes("kilian")) return ["you’re right, i should’ve communicated the timing more clearly", "the Medical Current review is complete and every row has a Keep or Delete decision", "i’m finishing the live verification now and i’ll send the confirmed file with a firm ETA shortly"];
+  if (person.includes("kilian")) return ["yeah i get what u mean", "i’ll clean it up and make sure it’s actually client ready"];
   if (person.includes("yashodeep")) return ["i’ve reviewed the request and i’m working from the latest source", "i’ll send the validated result with the exact file or query location once the final check is complete"];
   if (person.includes("abhinav") || person.includes("abhinao")) return ["i’ve got it and i’m reviewing the latest version now", "i’ll send the confirmed result and any remaining action items once the check is complete"];
   if (person.includes("aman") && /assignee|owner/.test(latest)) return ["yeah i mean the Owner column", "if it already has someone like james or emmy don’t pick it", "choose an open one without an owner and send me a screenshot if none are available"];
@@ -89,12 +89,36 @@ function draftsFor(conversation) {
 }
 
 function active() { return state.conversations.find((item) => item.id === state.activeId) || state.conversations[0]; }
-function updateCount() { $("#count").textContent = `${state.drafts.length} message${state.drafts.length === 1 ? "" : "s"}`; $("#approve").disabled = !active() || !state.drafts.length || state.drafts.some((text) => !text.trim()); }
+function normalizeDraftBubbles(drafts, keepEmpty = false) {
+  const normalized = drafts.flatMap((draft) => String(draft).split(/(?:\r?\n)+|(?<=[.!?])\s+/)).map((text) => text.trim().replace(/\.$/, ""));
+  return keepEmpty ? normalized : normalized.filter(Boolean);
+}
+function updateCount() {
+  const label = `${state.drafts.length} message${state.drafts.length === 1 ? "" : "s"}`;
+  $("#count").textContent = label;
+  $("#modal-count").textContent = label;
+  $("#approve").disabled = !active() || !state.drafts.length || state.drafts.some((text) => !text.trim());
+}
 function renderDrafts(drafts) {
-  state.drafts = [...drafts];
+  state.drafts = normalizeDraftBubbles(drafts, true);
   $("#reply-list").innerHTML = state.drafts.map((text, index) => `<div class="reply-item"><span class="reply-number">${index + 1}</span><textarea rows="3" data-draft-index="${index}" aria-label="Message ${index + 1}">${escapeHtml(text)}</textarea>${state.drafts.length > 1 ? `<button class="remove-message" data-remove-index="${index}" aria-label="Remove message ${index + 1}">×</button>` : ""}</div>`).join("");
   document.querySelectorAll("[data-draft-index]").forEach((input) => input.addEventListener("input", () => { state.drafts[Number(input.dataset.draftIndex)] = input.value; updateCount(); }));
+  document.querySelectorAll("[data-draft-index]").forEach((input) => input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    const index = Number(input.dataset.draftIndex);
+    const before = input.value.slice(0, input.selectionStart).trim();
+    const after = input.value.slice(input.selectionEnd).trim();
+    state.drafts.splice(index, 1, before, after);
+    renderDrafts(state.drafts.filter(Boolean));
+    document.querySelector(`[data-draft-index="${Math.min(index + 1, state.drafts.length - 1)}"]`)?.focus();
+  }));
+  document.querySelectorAll("[data-draft-index]").forEach((input) => input.addEventListener("blur", () => {
+    const normalized = normalizeDraftBubbles(state.drafts);
+    if (normalized.length !== state.drafts.length) renderDrafts(normalized);
+  }));
   document.querySelectorAll("[data-remove-index]").forEach((button) => button.addEventListener("click", () => { state.drafts.splice(Number(button.dataset.removeIndex), 1); renderDrafts(state.drafts); }));
+  $("#draft-preview").innerHTML = state.drafts.map((text) => `<div class="draft-preview-bubble">${escapeHtml(text)}</div>`).join("");
   updateCount();
 }
 function setNotice(text, error = false) { const node = $("#notice"); node.hidden = !text; node.textContent = text; node.style.background = error ? "#fff0e9" : "#dff7ee"; node.style.color = error ? "#99462f" : "#126d58"; }
@@ -188,6 +212,9 @@ $("#password").addEventListener("keydown", (event) => { if (event.key === "Enter
 $("#refresh").addEventListener("click", refresh);
 $("#search").addEventListener("input", renderConversationList);
 document.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderConversationList(); }));
+$("#edit-draft").addEventListener("click", () => $("#draft-modal").showModal());
+$("#close-draft").addEventListener("click", () => $("#draft-modal").close());
+$("#save-draft").addEventListener("click", () => { renderDrafts(state.drafts); $("#draft-modal").close(); });
 $("#add-message").addEventListener("click", () => renderDrafts([...state.drafts, ""]));
 $("#regenerate").addEventListener("click", async () => {
   const item = active();
