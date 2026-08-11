@@ -77,9 +77,11 @@ function makeConversations(rows, structured = false) {
 
 function draftsFor(conversation) {
   if (!conversation) return [];
-  if (conversation.suggestedDrafts?.length) return normalizeDraftBubbles(conversation.suggestedDrafts);
   const latest = conversation.messages.filter((m) => m.direction === "inbound").at(-1)?.text.toLowerCase() || "";
   const person = conversation.person.toLowerCase();
+  const suggested = normalizeDraftBubbles(conversation.suggestedDrafts || []);
+  const formalCachedDraft = /\bunderstood\b|purposeful|fully formatted|communicated the timing|firm ETA/i.test(suggested.join(" "));
+  if (suggested.length && !(person.includes("kilian") && formalCachedDraft)) return suggested;
   if (person.includes("kilian")) return ["yeah i get what u mean", "i’ll clean it up and make sure it’s actually client ready"];
   if (person.includes("yashodeep")) return ["i’ve reviewed the request and i’m working from the latest source", "i’ll send the validated result with the exact file or query location once the final check is complete"];
   if (person.includes("abhinav") || person.includes("abhinao")) return ["i’ve got it and i’m reviewing the latest version now", "i’ll send the confirmed result and any remaining action items once the check is complete"];
