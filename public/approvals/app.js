@@ -81,9 +81,9 @@ function draftsFor(conversation) {
   const person = conversation.person.toLowerCase();
   const suggested = normalizeDraftBubbles(conversation.suggestedDrafts || []);
   const formalCachedDraft = /\bunderstood\b|purposeful|fully formatted|communicated the timing|firm ETA/i.test(suggested.join(" "));
-  if (person.includes("kilian") && /we(?:'re| are) good for now|no follow[- ]?up|nothing else needed/i.test(latest)) return ["sounds good"];
+  if (person.includes("kilian") && /we(?:'re| are) good for now|no follow[- ]?up|nothing else needed/i.test(latest)) return ["sounds good, thank you"];
   if (suggested.length && !(person.includes("kilian") && formalCachedDraft)) return suggested;
-  if (person.includes("kilian")) return ["yeah i get what u mean", "i’ll clean it up and make sure it’s actually client ready"];
+  if (person.includes("kilian")) return ["i understand what you mean", "i’ll clean it up and make sure it’s client ready"];
   if (person.includes("yashodeep")) return ["i’ve reviewed the request and i’m working from the latest source", "i’ll send the validated result with the exact file or query location once the final check is complete"];
   if (person.includes("abhinav") || person.includes("abhinao")) return ["i’ve got it and i’m reviewing the latest version now", "i’ll send the confirmed result and any remaining action items once the check is complete"];
   if (person.includes("aman") && /assignee|owner/.test(latest)) return ["yeah i mean the Owner column", "if it already has someone like james or emmy don’t pick it", "choose an open one without an owner and send me a screenshot if none are available"];
@@ -121,7 +121,9 @@ function renderDrafts(drafts) {
     if (normalized.length !== state.drafts.length) renderDrafts(normalized);
   }));
   document.querySelectorAll("[data-remove-index]").forEach((button) => button.addEventListener("click", () => { state.drafts.splice(Number(button.dataset.removeIndex), 1); renderDrafts(state.drafts); }));
-  $("#draft-preview").innerHTML = state.drafts.map((text) => `<div class="draft-preview-bubble">${escapeHtml(text)}</div>`).join("");
+  $("#draft-preview").innerHTML = state.drafts.map((text, index) => `<div class="draft-preview-item"><div class="draft-preview-bubble">${escapeHtml(text)}</div><div class="draft-preview-actions"><button data-send-draft="${index}">Send</button><button data-cancel-draft="${index}">Cancel</button></div></div>`).join("");
+  document.querySelectorAll("[data-cancel-draft]").forEach((button) => button.addEventListener("click", () => { state.drafts.splice(Number(button.dataset.cancelDraft), 1); renderDrafts(state.drafts); }));
+  document.querySelectorAll("[data-send-draft]").forEach((button) => button.addEventListener("click", () => approveDrafts([state.drafts[Number(button.dataset.sendDraft)]])));
   updateCount();
 }
 function setNotice(text, error = false) { const node = $("#notice"); node.hidden = !text; node.textContent = text; node.style.background = error ? "#fff0e9" : "#dff7ee"; node.style.color = error ? "#99462f" : "#126d58"; }
@@ -241,17 +243,20 @@ $("#regenerate").addEventListener("click", async () => {
   } catch (error) { setNotice(error.message, true); }
 });
 $("#hold").addEventListener("click", () => setNotice("Held — nothing was sent"));
-$("#approve").addEventListener("click", async () => {
+async function approveDrafts(drafts) {
   const item = active();
-  if (!item || !state.drafts.length || state.drafts.some((text) => !text.trim())) return;
+  if (!item || !drafts.length || drafts.some((text) => !text.trim())) return;
   $("#approve").disabled = true;
   try {
-    const response = await fetch("/approvals/api/approve", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, drafts: state.drafts.map((text) => text.trim()), sourceMessageIds: item.sourceMessageIds }) });
+    const response = await fetch("/approvals/api/approve", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, drafts: drafts.map((text) => text.trim()), sourceMessageIds: item.sourceMessageIds }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not queue reply");
     setNotice("Approved — queued for the Windows computer to send in Teams");
   } catch (error) { setNotice(error.message, true); }
   updateCount();
+}
+$("#approve").addEventListener("click", async () => {
+  await approveDrafts(state.drafts);
 });
 
 refresh();

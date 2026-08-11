@@ -1837,6 +1837,7 @@ app.post(
           direction,
           draftStyle: {
             voice: "write-like-ashwin",
+            tone: "casual-professional",
             lowercase: true,
             short: true,
             oneThoughtPerBubble: true,
