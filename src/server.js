@@ -91,6 +91,9 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+app.get("/approvals", (_req, res) => {
+  res.sendFile(path.resolve("public/approvals/index.html"));
+});
 app.use(express.static(path.resolve("public")));
 
 const upload = multer({
@@ -1536,6 +1539,56 @@ async function handleMcpRequest(req, res) {
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true, storageDriver, storageConfigured: storageConfigured() });
 });
+
+app.get(
+  "/approvals/api/inbox",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (_req, res, next) => {
+    try {
+      const meta = await readMeta();
+      const messages = filterMessages(meta.messages || [], {
+        to: "ashwin-main-codex",
+        from: "ashwin-remote-codex"
+      })
+        .slice(0, 500)
+        .map(publicMessage);
+      res.json({ messages, syncedAt: new Date().toISOString() });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.post(
+  "/approvals/api/approve",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const recipient = cleanText(req.body?.recipient, 120);
+      const draft = cleanText(req.body?.draft, 4000);
+      const sourceMessageIds = Array.isArray(req.body?.sourceMessageIds)
+        ? req.body.sourceMessageIds.map((id) => cleanText(id, 80)).filter(Boolean)
+        : [];
+      if (!recipient || !draft) {
+        res.status(400).json({ error: "Recipient and draft are required" });
+        return;
+      }
+      const message = await createMessage({
+        from: "ashwin-main-codex",
+        to: "ashwin-remote-codex",
+        project: "Mindsight Campaign Implementation",
+        category: "APPROVED_SEND",
+        tags: ["teams", "approval-desk", "user-approved"],
+        body: `User approved in Teams Approval Desk. Send this exact reply to ${recipient} in Teams now:\n\n"${draft}"\n\nReply with exact sent text and timestamp. Source FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
+      });
+      res.status(201).json({ ok: true, messageId: message.id });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 app.post("/mcp", async (req, res, next) => {
   try {

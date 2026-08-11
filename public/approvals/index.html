@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Teams Approval Desk</title>
+    <link rel="stylesheet" href="/approvals/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="rail" aria-label="Primary navigation"><div class="logo">A</div><button class="rail-button active">▣<small>Inbox</small></button><span class="spacer"></span><div class="avatar">AC</div></nav>
+      <section class="inbox">
+        <header><div><p class="eyebrow">TEAMS APPROVAL DESK</p><h1>Messages</h1></div><button id="refresh" class="icon" aria-label="Refresh messages">↻</button></header>
+        <div class="auth"><input id="password" type="password" autocomplete="current-password" placeholder="FileDrop password" aria-label="FileDrop password" /><button id="connect">Connect</button></div>
+        <label class="search">⌕ <input id="search" placeholder="Search people or messages" aria-label="Search people or messages" /></label>
+        <div class="filters"><button data-filter="unread" class="active">Unread</button><button data-filter="all">All</button><span id="waiting">0 waiting</span></div>
+        <div id="conversations" class="conversation-list"><p class="empty">Enter the FileDrop password to load Teams messages.</p></div>
+        <footer id="status"><span class="dot"></span><div><strong>Not connected</strong><small>Approval is always required before sending</small></div></footer>
+      </section>
+      <section class="chat">
+        <header><div id="chat-avatar" class="avatar large">—</div><div><h2 id="chat-name">No conversation selected</h2><p>Project team · Teams</p></div></header>
+        <div class="context"><b>✓</b><div><strong>Project context loaded</strong><small>Kite/Gilead Medical Account Plan · mapping, UAT, live validation</small></div></div>
+        <div id="messages" class="messages"><p class="empty">Waiting for messages</p></div>
+        <div class="locked">Replies are sent only after approval <span>🔒</span></div>
+      </section>
+      <aside class="draft">
+        <header><div><p class="eyebrow">READY TO SEND</p><h2>Suggested reply</h2></div><span class="badge">Project aware</span></header>
+        <div class="why"><b>✦</b><div><strong>Built from current context</strong><p>Uses the latest raw message and current project status.</p></div></div>
+        <label for="reply">Edit before approving</label>
+        <textarea id="reply" rows="10" placeholder="Select a conversation"></textarea>
+        <div class="tools"><button id="regenerate">↺ Regenerate</button><span id="count">0 characters</span></div>
+        <div class="approval"><b>✓</b><div><strong>Your approval is required</strong><p>This queues the exact text for the Windows computer. It never sends automatically.</p></div></div>
+        <button id="approve" class="approve" disabled>Approve &amp; send in Teams</button>
+        <button id="hold" class="hold">Hold for later</button>
+        <p id="notice" class="notice" hidden></p>
+      </aside>
+    </main>
+    <script src="/approvals/app.js" defer></script>
+  </body>
+</html>
