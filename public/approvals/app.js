@@ -41,6 +41,7 @@ function parseStructured(row) {
     person: String(event.conversationName),
     conversationId: String(event.conversationId || ""),
     suggestedDraft: String(event.suggestedDraft || ""),
+    sensitivity: event.sensitivity === "sensitive" ? "sensitive" : "ordinary",
     messages: [{
       id: String(event.sourceMessageId || row.id),
       sender: direction === "outbound" ? "You" : String(event.sender || event.conversationName),
@@ -58,12 +59,13 @@ function makeConversations(rows, structured = false) {
     const parsed = structured ? parseStructured(row) : parseReport(row);
     if (!parsed) return;
     const id = parsed.conversationId ? keyFor(parsed.conversationId) : keyFor(parsed.person);
-    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDraft: "" };
+    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDraft: "", sensitivity: "ordinary" };
     item.messages.push(...parsed.messages);
     item.unread += parsed.messages.filter((message) => message.direction === "inbound").length;
     item.sourceMessageIds.push(row.id);
     item.lastSeen = displayTime(row.createdAt);
     if (parsed.suggestedDraft) item.suggestedDraft = parsed.suggestedDraft;
+    if (parsed.sensitivity === "sensitive") item.sensitivity = "sensitive";
     map.set(id, item);
   });
   return [...map.values()].reverse();
@@ -90,7 +92,7 @@ function renderConversationList() {
   $("#waiting").textContent = `${state.conversations.reduce((sum, item) => sum + item.unread, 0)} waiting`;
   $("#conversations").innerHTML = visible.length ? visible.map((item) => {
     const last = item.messages.at(-1);
-    return `<button class="conversation ${item.id === active()?.id ? "selected" : ""}" data-id="${item.id}"><span class="avatar ${item.priority === "high" ? "urgent" : ""}">${initials(item.person)}</span><span class="conversation-copy"><span class="conversation-top"><strong>${escapeHtml(item.person)}</strong><time>${item.lastSeen}</time></span><p>${escapeHtml(last?.text)}</p></span>${item.unread ? `<span class="unread">${item.unread}</span>` : ""}</button>`;
+    return `<button class="conversation ${item.id === active()?.id ? "selected" : ""}" data-id="${item.id}"><span class="avatar ${item.priority === "high" ? "urgent" : ""}">${initials(item.person)}</span><span class="conversation-copy"><span class="conversation-top"><strong>${escapeHtml(item.person)} ${item.sensitivity === "sensitive" ? '<em class="sensitive-chip">Sensitive</em>' : ""}</strong><time>${item.lastSeen}</time></span><p>${escapeHtml(last?.text)}</p></span>${item.unread ? `<span class="unread">${item.unread}</span>` : ""}</button>`;
   }).join("") : '<p class="empty">No conversations match this view.</p>';
   document.querySelectorAll(".conversation").forEach((button) => button.addEventListener("click", () => selectConversation(button.dataset.id)));
 }
@@ -101,6 +103,7 @@ function selectConversation(id) {
   renderConversationList();
   $("#chat-avatar").textContent = initials(item.person);
   $("#chat-name").textContent = item.person;
+  $("#sensitive-banner").hidden = item.sensitivity !== "sensitive";
   $("#messages").innerHTML = item.messages.map((message) => `<article class="message ${message.direction}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div><div class="bubble">${escapeHtml(message.text)}</div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`).join("");
   hydrateImages();
   $("#messages").scrollTop = $("#messages").scrollHeight;

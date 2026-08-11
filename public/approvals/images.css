@@ -3,3 +3,10 @@
 .image-card small { display: block; margin-top: 5px; color: #818697; font-size: 9px; overflow-wrap: anywhere; }
 .image-card.unavailable img { display: none; }
 .image-card.unavailable::before { content: "Screenshot unavailable"; display: block; color: #99462f; font-size: 11px; }
+.sensitive-chip { display: inline-block; margin-left: 5px; padding: 2px 5px; border-radius: 99px; background: #fee2e2; color: #a32626; font-size: 8px; font-style: normal; text-transform: uppercase; letter-spacing: .4px; vertical-align: 1px; }
+.sensitive-banner { margin: 8px 20px 0; padding: 11px 13px; display: flex; gap: 9px; background: #fff1f1; border: 1px solid #f2bcbc; border-radius: 10px; color: #8f2020; }
+.sensitive-banner[hidden] { display: none; }
+.sensitive-banner > b { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: #b83232; color: #fff; }
+.sensitive-banner div { display: grid; gap: 2px; }
+.sensitive-banner strong { font-size: 11px; }
+.sensitive-banner small { font-size: 10px; line-height: 1.4; }
