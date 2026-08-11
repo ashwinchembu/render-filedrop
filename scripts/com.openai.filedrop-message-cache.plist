@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.openai.filedrop-message-cache</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ashwin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node</string>
+    <string>/Users/ashwin/Documents/Codex/2026-07-31/files-mentioned-by-the-user-filedrop/work/render-filedrop-queue/scripts/local-message-cache.mjs</string>
+    <string>--watch</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/tmp/filedrop-message-cache.log</string>
+  <key>StandardErrorPath</key><string>/tmp/filedrop-message-cache.error.log</string>
+</dict>
+</plist>

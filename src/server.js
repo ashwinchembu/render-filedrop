@@ -7,6 +7,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
@@ -158,6 +159,79 @@ async function writeMeta(meta) {
   const tempPath = `${metaPath}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(tempPath, JSON.stringify(meta, null, 2));
   await fs.rename(tempPath, metaPath);
+}
+
+let eventLogReadyPromise;
+const eventRecordCache = new Map();
+
+function eventObjectKey(kind, record) {
+  const timestamp = String(record.createdAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  const scope = kind === "channel" ? `${channelId(record.channelId)}/` : "";
+  return `events/${kind}/${scope}${timestamp}_${record.id}.json`;
+}
+
+async function putEventObject(key, value) {
+  await s3.send(new PutObjectCommand({ Bucket: s3Bucket, Key: s3Key(key), Body: JSON.stringify(value), ContentType: "application/json" }));
+  eventRecordCache.set(s3Key(key), value);
+}
+
+async function listEventObjects(prefix) {
+  const records = [];
+  let continuationToken;
+  do {
+    const page = await s3.send(new ListObjectsV2Command({ Bucket: s3Bucket, Prefix: s3Key(prefix), ContinuationToken: continuationToken }));
+    const keys = (page.Contents || []).map((item) => item.Key).filter((key) => key?.endsWith(".json"));
+    const missingKeys = keys.filter((key) => !eventRecordCache.has(key));
+    await Promise.all(missingKeys.map(async (key) => {
+      const result = await s3.send(new GetObjectCommand({ Bucket: s3Bucket, Key: key }));
+      const value = JSON.parse(await result.Body.transformToString());
+      eventRecordCache.set(key, value);
+      return value;
+    }));
+    records.push(...keys.map((key) => eventRecordCache.get(key)).filter(Boolean));
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return records;
+}
+
+async function ensureS3EventLog() {
+  if (storageDriver !== "s3") return;
+  if (!eventLogReadyPromise) eventLogReadyPromise = (async () => {
+    const markerKey = s3Key("events/backfill-v1.complete.json");
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: s3Bucket, Key: markerKey }));
+      return;
+    } catch (error) {
+      if (error.name !== "NotFound" && error.$metadata?.httpStatusCode !== 404) throw error;
+    }
+    const meta = await readMeta();
+    const records = [
+      ...(meta.messages || []).map((record) => ({ kind: "mailbox", record })),
+      ...(meta.channelMessages || []).map((record) => ({ kind: "channel", record }))
+    ];
+    for (let index = 0; index < records.length; index += 20) {
+      await Promise.all(records.slice(index, index + 20).map(({ kind, record }) => putEventObject(eventObjectKey(kind, record), record)));
+    }
+    await s3.send(new PutObjectCommand({ Bucket: s3Bucket, Key: markerKey, Body: JSON.stringify({ completedAt: new Date().toISOString(), records: records.length }), ContentType: "application/json" }));
+  })().catch((error) => { eventLogReadyPromise = undefined; throw error; });
+  return eventLogReadyPromise;
+}
+
+async function readMailboxMessages() {
+  if (storageDriver !== "s3") return (await readMeta()).messages || [];
+  await ensureS3EventLog();
+  const [messages, receipts] = await Promise.all([listEventObjects("events/mailbox/"), listEventObjects("events/read/mailbox/")]);
+  const read = new Map(receipts.map((item) => [item.id, item.readAt]));
+  return messages.map((message) => ({ ...message, readAt: read.get(message.id) || message.readAt || "" })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+async function readChannelMessages(channelValue = "") {
+  if (storageDriver !== "s3") return (await readMeta()).channelMessages || [];
+  await ensureS3EventLog();
+  const normalized = channelValue ? `${channelId(channelValue)}/` : "";
+  const [messages, receipts] = await Promise.all([listEventObjects(`events/channel/${normalized}`), listEventObjects("events/read/channel/")]);
+  const read = new Map(receipts.map((item) => [item.id, item.readAt]));
+  return messages.map((message) => ({ ...message, readAt: read.get(message.id) || message.readAt || "" })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
 let jobMutation = Promise.resolve();
@@ -387,8 +461,6 @@ async function createMessage(body = {}) {
     throw error;
   }
 
-  const meta = await readMeta();
-  meta.messages ||= [];
   const message = {
     id: crypto.randomUUID(),
     from: cleanText(body.from, 80) || "unknown",
@@ -402,8 +474,15 @@ async function createMessage(body = {}) {
     relatedUrl: cleanText(body.relatedUrl, 500),
     readAt: ""
   };
-  meta.messages.unshift(message);
-  await writeMeta(meta);
+  if (storageDriver === "s3") {
+    await ensureS3EventLog();
+    await putEventObject(eventObjectKey("mailbox", message), message);
+  } else {
+    const meta = await readMeta();
+    meta.messages ||= [];
+    meta.messages.unshift(message);
+    await writeMeta(meta);
+  }
   await triggerWebhooks("message.created", { message: publicMessage(message) });
   return message;
 }
@@ -422,12 +501,17 @@ function filterMessages(messages = [], { to, from, since, unreadOnly, project, c
 }
 
 async function markMessageRead(id) {
-  const meta = await readMeta();
-  meta.messages ||= [];
-  const message = meta.messages.find((item) => item.id === id);
+  const messages = await readMailboxMessages();
+  const message = messages.find((item) => item.id === id);
   if (!message) return null;
   message.readAt = new Date().toISOString();
-  await writeMeta(meta);
+  if (storageDriver === "s3") await putEventObject(`events/read/mailbox/${id}.json`, { id, readAt: message.readAt });
+  else {
+    const meta = await readMeta();
+    const stored = (meta.messages || []).find((item) => item.id === id);
+    if (stored) stored.readAt = message.readAt;
+    await writeMeta(meta);
+  }
   return message;
 }
 
@@ -503,9 +587,9 @@ async function createChannelMessage(channelValue, body = {}) {
 
   const meta = await readMeta();
   meta.channels ||= [];
-  meta.channelMessages ||= [];
   const id = channelId(channelValue);
   let channel = meta.channels.find((item) => item.id === id);
+  const channelWasCreated = !channel;
   if (!channel) {
     channel = {
       id,
@@ -532,8 +616,15 @@ async function createChannelMessage(channelValue, body = {}) {
     relatedUrl: cleanText(body.relatedUrl, 500),
     readAt: ""
   };
-  meta.channelMessages.unshift(message);
-  await writeMeta(meta);
+  if (storageDriver === "s3") {
+    await ensureS3EventLog();
+    if (channelWasCreated) await writeMeta(meta);
+    await putEventObject(eventObjectKey("channel", message), message);
+  } else {
+    meta.channelMessages ||= [];
+    meta.channelMessages.unshift(message);
+    await writeMeta(meta);
+  }
   await triggerWebhooks("channel.message.created", {
     channel: publicChannel(channel),
     message: publicChannelMessage(message)
@@ -554,13 +645,18 @@ function filterChannelMessages(messages = [], { channelId: id, from, since, unre
 }
 
 async function markChannelMessageRead(channelValue, id) {
-  const meta = await readMeta();
-  meta.channelMessages ||= [];
   const expectedChannelId = channelId(channelValue);
-  const message = meta.channelMessages.find((item) => item.id === id && item.channelId === expectedChannelId);
+  const messages = await readChannelMessages(expectedChannelId);
+  const message = messages.find((item) => item.id === id && item.channelId === expectedChannelId);
   if (!message) return null;
   message.readAt = new Date().toISOString();
-  await writeMeta(meta);
+  if (storageDriver === "s3") await putEventObject(`events/read/channel/${id}.json`, { id, channelId: expectedChannelId, readAt: message.readAt });
+  else {
+    const meta = await readMeta();
+    const stored = (meta.channelMessages || []).find((item) => item.id === id && item.channelId === expectedChannelId);
+    if (stored) stored.readAt = message.readAt;
+    await writeMeta(meta);
+  }
   return message;
 }
 
@@ -1107,8 +1203,7 @@ function createMcpServer(req) {
       }
     },
     async (input) => {
-      const meta = await readMeta();
-      const messages = filterChannelMessages(meta.channelMessages || [], input).map(publicChannelMessage);
+      const messages = filterChannelMessages(await readChannelMessages(input.channelId), input).map(publicChannelMessage);
       const text = messages.length
         ? messages.map((message) => `${message.id} | ${message.createdAt} | ${message.from}: ${message.body}`).join("\n")
         : "No channel messages found.";
@@ -1154,8 +1249,7 @@ function createMcpServer(req) {
       }
     },
     async (input) => {
-      const meta = await readMeta();
-      const messages = filterMessages(meta.messages || [], input).map(publicMessage);
+      const messages = filterMessages(await readMailboxMessages(), input).map(publicMessage);
       const text = messages.length
         ? messages.map((message) => `${message.id} | ${message.createdAt} | ${message.from} -> ${message.to}: ${message.body}`).join("\n")
         : "No messages found.";
@@ -1546,13 +1640,12 @@ app.get(
   requireWebPassword,
   async (_req, res, next) => {
     try {
-      const meta = await readMeta();
-      const events = filterChannelMessages(meta.channelMessages || [], {
+      const events = filterChannelMessages(await readChannelMessages("teams-approval-monitor"), {
         channelId: "teams-approval-monitor"
       })
         .slice(0, 1000)
         .map(publicChannelMessage);
-      const messages = filterMessages(meta.messages || [], {
+      const messages = filterMessages(await readMailboxMessages(), {
         to: "ashwin-main-codex",
         from: "ashwin-remote-codex"
       })
@@ -1805,8 +1898,7 @@ app.post("/api/channels", requireConfiguredSecret(apiKey, "API_KEY"), requireApi
 
 app.get("/api/channels/:channelId/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
-    const meta = await readMeta();
-    const messages = filterChannelMessages(meta.channelMessages || [], {
+    const messages = filterChannelMessages(await readChannelMessages(req.params.channelId), {
       channelId: req.params.channelId,
       from: cleanText(req.query.from, 80),
       since: cleanText(req.query.since, 80),
@@ -1844,8 +1936,7 @@ app.patch("/api/channels/:channelId/messages/:id/read", requireConfiguredSecret(
 
 app.get("/api/messages", requireConfiguredSecret(apiKey, "API_KEY"), requireApiKey, async (req, res, next) => {
   try {
-    const meta = await readMeta();
-    const messages = filterMessages(meta.messages || [], {
+    const messages = filterMessages(await readMailboxMessages(), {
       to: cleanText(req.query.to, 80),
       from: cleanText(req.query.from, 80),
       project: cleanText(req.query.project, 120),
@@ -2136,8 +2227,7 @@ app.get("/web/projects", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWOR
 
 app.get("/web/messages", requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"), requireWebPassword, async (req, res, next) => {
   try {
-    const meta = await readMeta();
-    const messages = filterMessages(meta.messages || [], {
+    const messages = filterMessages(await readMailboxMessages(), {
       to: cleanText(req.query.to, 80),
       from: cleanText(req.query.from, 80),
       since: cleanText(req.query.since, 80),
