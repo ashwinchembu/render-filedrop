@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { conversations: [], activeId: "", filter: "unread", password: sessionStorage.getItem("filedropApprovalPassword") || "", drafts: [] };
+const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [] };
 
 const escapeHtml = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const initials = (name) => name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
@@ -137,10 +137,10 @@ async function hydrateImages() {
 }
 
 async function refresh() {
-  if (!state.password) return;
   $("#refresh").disabled = true;
   try {
-    const response = await fetch("/approvals/api/inbox", { headers: { "x-upload-password": state.password }, cache: "no-store" });
+    const headers = state.password ? { "x-upload-password": state.password } : {};
+    const response = await fetch("/approvals/api/inbox", { headers, cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not load messages");
     const pushed = makeConversations(payload.events || [], true);
@@ -157,11 +157,25 @@ async function refresh() {
     $("#status").classList.remove("connected");
     $("#status strong").textContent = "Connection failed";
     $("#status small").textContent = error.message;
+    if (/invalid upload password/i.test(error.message)) $(".auth").hidden = false;
   } finally { $("#refresh").disabled = false; }
 }
 
-$("#password").value = state.password;
-$("#connect").addEventListener("click", () => { state.password = $("#password").value; sessionStorage.setItem("filedropApprovalPassword", state.password); refresh(); });
+$("#connect").addEventListener("click", async () => {
+  const password = $("#password").value;
+  try {
+    const response = await fetch("/approvals/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not connect");
+    $("#password").value = "";
+    $(".auth").hidden = true;
+    await refresh();
+  } catch (error) {
+    $("#status").classList.remove("connected");
+    $("#status strong").textContent = "Connection failed";
+    $("#status small").textContent = error.message;
+  }
+});
 $("#password").addEventListener("keydown", (event) => { if (event.key === "Enter") $("#connect").click(); });
 $("#refresh").addEventListener("click", refresh);
 $("#search").addEventListener("input", renderConversationList);
@@ -195,5 +209,5 @@ $("#approve").addEventListener("click", async () => {
   updateCount();
 });
 
-if (state.password) refresh();
-setInterval(() => state.password && refresh(), 30000);
+refresh();
+setInterval(refresh, 30000);

@@ -49,6 +49,7 @@ const s3ForcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
 const telegramApprovalSecret = process.env.TELEGRAM_APPROVAL_WEBHOOK_SECRET || "";
 const telegramApprovalChatId = process.env.TELEGRAM_APPROVAL_CHAT_ID || "";
 const telegramApprovalBotToken = process.env.TELEGRAM_APPROVAL_BOT_TOKEN || "";
+const approvalSessionMaxAgeSeconds = 30 * 24 * 60 * 60;
 
 let filesDir = path.join(storageDir, "files");
 let metaPath = path.join(storageDir, "metadata.json");
@@ -304,11 +305,45 @@ function requireConfiguredSecret(secret, name) {
   };
 }
 
+function safeSecretEqual(value, expectedValue) {
+  const provided = Buffer.from(value || "");
+  const expected = Buffer.from(expectedValue || "");
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+}
+
+function approvalSessionSignature(expiresAt) {
+  return crypto
+    .createHmac("sha256", `${uploadPassword}\0${apiKey}`)
+    .update(`approvals:${expiresAt}`)
+    .digest("base64url");
+}
+
+function createApprovalSessionToken() {
+  const expiresAt = Math.floor(Date.now() / 1000) + approvalSessionMaxAgeSeconds;
+  return `${expiresAt}.${approvalSessionSignature(expiresAt)}`;
+}
+
+function hasValidApprovalSession(req) {
+  const cookieHeader = req.header("cookie") || "";
+  const token = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("filedrop_approval_session="))
+    ?.slice("filedrop_approval_session=".length);
+  if (!token) return false;
+  const [expiresAtText, signature] = token.split(".");
+  const expiresAt = Number(expiresAtText);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) return false;
+  return safeSecretEqual(signature, approvalSessionSignature(expiresAt));
+}
+
 function requireWebPassword(req, res, next) {
+  if (hasValidApprovalSession(req)) {
+    next();
+    return;
+  }
   const password = req.header("x-upload-password") || req.body?.password;
-  const provided = Buffer.from(password || "");
-  const expected = Buffer.from(uploadPassword);
-  if (provided.length === expected.length && crypto.timingSafeEqual(provided, expected)) {
+  if (safeSecretEqual(password, uploadPassword)) {
     next();
     return;
   }
@@ -1655,6 +1690,23 @@ app.get(
     } catch (error) {
       next(error);
     }
+  }
+);
+
+app.post(
+  "/approvals/api/session",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  (req, res) => {
+    if (!safeSecretEqual(req.body?.password, uploadPassword)) {
+      res.status(401).json({ error: "Invalid upload password" });
+      return;
+    }
+    const secure = req.secure ? "; Secure" : "";
+    res.setHeader(
+      "Set-Cookie",
+      `filedrop_approval_session=${createApprovalSessionToken()}; HttpOnly; SameSite=Strict; Path=/approvals; Max-Age=${approvalSessionMaxAgeSeconds}${secure}`
+    );
+    res.json({ ok: true, expiresInSeconds: approvalSessionMaxAgeSeconds });
   }
 );
 
