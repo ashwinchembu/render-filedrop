@@ -54,6 +54,7 @@ const approvalSessionMaxAgeSeconds = 30 * 24 * 60 * 60;
 let filesDir = path.join(storageDir, "files");
 let metaPath = path.join(storageDir, "metadata.json");
 const mcpTransports = {};
+const approvalHandshakeTokens = new Map();
 
 const s3 =
   storageDriver === "s3"
@@ -321,6 +322,28 @@ function approvalSessionSignature(expiresAt) {
 function createApprovalSessionToken() {
   const expiresAt = Math.floor(Date.now() / 1000) + approvalSessionMaxAgeSeconds;
   return `${expiresAt}.${approvalSessionSignature(expiresAt)}`;
+}
+
+function createApprovalHandshakeToken() {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const digest = crypto.createHash("sha256").update(token).digest("hex");
+  approvalHandshakeTokens.set(digest, Date.now() + 5 * 60 * 1000);
+  return token;
+}
+
+function consumeApprovalHandshakeToken(token) {
+  const digest = crypto.createHash("sha256").update(token || "").digest("hex");
+  const expiresAt = approvalHandshakeTokens.get(digest);
+  approvalHandshakeTokens.delete(digest);
+  return Boolean(expiresAt && expiresAt > Date.now());
+}
+
+function setApprovalSessionCookie(req, res) {
+  const secure = req.secure ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `filedrop_approval_session=${createApprovalSessionToken()}; HttpOnly; SameSite=Strict; Path=/approvals; Max-Age=${approvalSessionMaxAgeSeconds}${secure}`
+  );
 }
 
 function hasValidApprovalSession(req) {
@@ -1701,14 +1724,33 @@ app.post(
       res.status(401).json({ error: "Invalid upload password" });
       return;
     }
-    const secure = req.secure ? "; Secure" : "";
-    res.setHeader(
-      "Set-Cookie",
-      `filedrop_approval_session=${createApprovalSessionToken()}; HttpOnly; SameSite=Strict; Path=/approvals; Max-Age=${approvalSessionMaxAgeSeconds}${secure}`
-    );
+    setApprovalSessionCookie(req, res);
     res.json({ ok: true, expiresInSeconds: approvalSessionMaxAgeSeconds });
   }
 );
+
+app.post(
+  "/api/approval-session-links",
+  requireConfiguredSecret(apiKey, "API_KEY"),
+  requireApiKey,
+  (req, res) => {
+    const token = createApprovalHandshakeToken();
+    res.status(201).json({
+      url: `${req.protocol}://${req.get("host")}/approvals/session?token=${encodeURIComponent(token)}`,
+      expiresInSeconds: 300,
+      singleUse: true
+    });
+  }
+);
+
+app.get("/approvals/session", (req, res) => {
+  if (!consumeApprovalHandshakeToken(String(req.query.token || ""))) {
+    res.status(401).send("This approval handshake has expired or was already used.");
+    return;
+  }
+  setApprovalSessionCookie(req, res);
+  res.redirect(303, "/approvals");
+});
 
 app.get(
   "/approvals/api/files/:id",
