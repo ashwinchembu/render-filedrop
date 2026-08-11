@@ -1547,13 +1547,37 @@ app.get(
   async (_req, res, next) => {
     try {
       const meta = await readMeta();
+      const events = filterChannelMessages(meta.channelMessages || [], {
+        channelId: "teams-approval-monitor"
+      })
+        .slice(0, 1000)
+        .map(publicChannelMessage);
       const messages = filterMessages(meta.messages || [], {
         to: "ashwin-main-codex",
         from: "ashwin-remote-codex"
       })
         .slice(0, 500)
         .map(publicMessage);
-      res.json({ messages, syncedAt: new Date().toISOString() });
+      res.json({ events, messages, syncedAt: new Date().toISOString() });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.get(
+  "/approvals/api/files/:id",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const meta = await readMeta();
+      const file = meta.files.find((item) => item.id === req.params.id);
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      await sendFileObject(res, file);
     } catch (error) {
       next(error);
     }

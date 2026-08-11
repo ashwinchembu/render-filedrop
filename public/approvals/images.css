@@ -1,0 +1,5 @@
+.image-card { margin-top: 7px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.image-card img { display: block; max-width: 100%; max-height: 360px; border-radius: 7px; }
+.image-card small { display: block; margin-top: 5px; color: #818697; font-size: 9px; overflow-wrap: anywhere; }
+.image-card.unavailable img { display: none; }
+.image-card.unavailable::before { content: "Screenshot unavailable"; display: block; color: #99462f; font-size: 11px; }

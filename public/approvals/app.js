@@ -32,17 +32,38 @@ function parseReport(row) {
   return raw && person ? { person, messages: [{ id: row.id, sender: person, timestamp: displayTime(row.createdAt), text: raw[1].trim(), direction: "inbound" }] } : null;
 }
 
-function makeConversations(rows) {
+function parseStructured(row) {
+  let event;
+  try { event = JSON.parse(row.body); } catch { return null; }
+  if (event?.version !== 1 || event?.type !== "teams_message" || !event.conversationName || !event.text) return null;
+  const direction = event.direction === "outbound" ? "outbound" : "inbound";
+  return {
+    person: String(event.conversationName),
+    conversationId: String(event.conversationId || ""),
+    suggestedDraft: String(event.suggestedDraft || ""),
+    messages: [{
+      id: String(event.sourceMessageId || row.id),
+      sender: direction === "outbound" ? "You" : String(event.sender || event.conversationName),
+      timestamp: event.timestamp ? displayTime(event.timestamp) : displayTime(row.createdAt),
+      text: String(event.text),
+      direction,
+      imageFileIds: Array.isArray(event.imageFileIds) ? event.imageFileIds.map(String).filter(Boolean) : (row.relatedFileId ? [row.relatedFileId] : [])
+    }]
+  };
+}
+
+function makeConversations(rows, structured = false) {
   const map = new Map();
   [...rows].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).forEach((row) => {
-    const parsed = parseReport(row);
+    const parsed = structured ? parseStructured(row) : parseReport(row);
     if (!parsed) return;
-    const id = keyFor(parsed.person);
-    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal" };
+    const id = parsed.conversationId ? keyFor(parsed.conversationId) : keyFor(parsed.person);
+    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDraft: "" };
     item.messages.push(...parsed.messages);
     item.unread += parsed.messages.filter((message) => message.direction === "inbound").length;
     item.sourceMessageIds.push(row.id);
     item.lastSeen = displayTime(row.createdAt);
+    if (parsed.suggestedDraft) item.suggestedDraft = parsed.suggestedDraft;
     map.set(id, item);
   });
   return [...map.values()].reverse();
@@ -50,6 +71,7 @@ function makeConversations(rows) {
 
 function draftFor(conversation) {
   if (!conversation) return "";
+  if (conversation.suggestedDraft) return conversation.suggestedDraft;
   const latest = conversation.messages.filter((m) => m.direction === "inbound").at(-1)?.text.toLowerCase() || "";
   const person = conversation.person.toLowerCase();
   if (person.includes("aman") && /assignee|owner/.test(latest)) return "yeah i mean the Owner column. if it already has someone like james or emmy don’t pick it. choose an open one without an owner. if u don’t see one send me a screenshot and we can connect";
@@ -79,11 +101,22 @@ function selectConversation(id) {
   renderConversationList();
   $("#chat-avatar").textContent = initials(item.person);
   $("#chat-name").textContent = item.person;
-  $("#messages").innerHTML = item.messages.map((message) => `<article class="message ${message.direction}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div><div class="bubble">${escapeHtml(message.text)}</div></div></article>`).join("");
+  $("#messages").innerHTML = item.messages.map((message) => `<article class="message ${message.direction}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div><div class="bubble">${escapeHtml(message.text)}</div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`).join("");
+  hydrateImages();
   $("#messages").scrollTop = $("#messages").scrollHeight;
   $("#reply").value = draftFor(item);
   setNotice("");
   updateCount();
+}
+
+async function hydrateImages() {
+  for (const image of document.querySelectorAll("img[data-image-id]")) {
+    try {
+      const response = await fetch(`/approvals/api/files/${encodeURIComponent(image.dataset.imageId)}`, { headers: { "x-upload-password": state.password } });
+      if (!response.ok) throw new Error("image unavailable");
+      image.src = URL.createObjectURL(await response.blob());
+    } catch { image.closest(".image-card")?.classList.add("unavailable"); }
+  }
 }
 
 async function refresh() {
@@ -93,7 +126,10 @@ async function refresh() {
     const response = await fetch("/approvals/api/inbox", { headers: { "x-upload-password": state.password }, cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not load messages");
-    state.conversations = makeConversations(payload.messages || []);
+    const pushed = makeConversations(payload.events || [], true);
+    const legacy = makeConversations(payload.messages || []);
+    const pushedPeople = new Set(pushed.map((item) => item.person.toLowerCase()));
+    state.conversations = [...pushed, ...legacy.filter((item) => !pushedPeople.has(item.person.toLowerCase()))];
     if (!state.conversations.some((item) => item.id === state.activeId)) state.activeId = state.conversations[0]?.id || "";
     $("#status").classList.add("connected");
     $("#status strong").textContent = "FileDrop connected";
