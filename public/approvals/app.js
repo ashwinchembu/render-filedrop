@@ -35,14 +35,17 @@ function parseReport(row) {
 function parseStructured(row) {
   let event;
   try { event = JSON.parse(row.body); } catch { return null; }
-  if (event?.version !== 1 || event?.type !== "teams_message" || !event.conversationName || !event.text) return null;
+  if (event?.version !== 1 || !["teams_message", "teams_draft_update"].includes(event?.type) || !event.conversationName) return null;
+  if (event.type === "teams_message" && !event.text) return null;
   const direction = event.direction === "outbound" ? "outbound" : "inbound";
   return {
     person: String(event.conversationName),
     conversationId: String(event.conversationId || ""),
     suggestedDrafts: Array.isArray(event.suggestedDrafts) ? event.suggestedDrafts.map(String).filter((text) => text.trim()) : (event.suggestedDraft ? [String(event.suggestedDraft)] : []),
     sensitivity: event.sensitivity === "sensitive" ? "sensitive" : "ordinary",
-    messages: [{
+    recentWorkContext: String(event.recentWorkContext || ""),
+    isDraftUpdate: event.type === "teams_draft_update",
+    messages: event.type === "teams_draft_update" ? [] : [{
       id: String(event.sourceMessageId || row.id),
       sender: direction === "outbound" ? "You" : String(event.sender || event.conversationName),
       timestamp: event.timestamp ? displayTime(event.timestamp) : displayTime(row.createdAt),
@@ -59,12 +62,13 @@ function makeConversations(rows, structured = false) {
     const parsed = structured ? parseStructured(row) : parseReport(row);
     if (!parsed) return;
     const id = parsed.conversationId ? keyFor(parsed.conversationId) : keyFor(parsed.person);
-    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDrafts: [], sensitivity: "ordinary" };
+    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDrafts: [], sensitivity: "ordinary", recentWorkContext: "" };
     item.messages.push(...parsed.messages);
     item.unread += parsed.messages.filter((message) => message.direction === "inbound").length;
     item.sourceMessageIds.push(row.id);
     item.lastSeen = displayTime(row.createdAt);
     if (parsed.suggestedDrafts?.length) item.suggestedDrafts = parsed.suggestedDrafts;
+    if (parsed.recentWorkContext) item.recentWorkContext = parsed.recentWorkContext;
     if (parsed.sensitivity === "sensitive") item.sensitivity = "sensitive";
     map.set(id, item);
   });
@@ -113,6 +117,7 @@ function selectConversation(id) {
   $("#chat-avatar").textContent = initials(item.person);
   $("#chat-name").textContent = item.person;
   $("#sensitive-banner").hidden = item.sensitivity !== "sensitive";
+  $("#work-context").textContent = item.recentWorkContext || "No refreshed work context was provided yet. Regenerate to request a fresh check.";
   $("#messages").innerHTML = item.messages.map((message) => `<article class="message ${message.direction}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div><div class="bubble">${escapeHtml(message.text)}</div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`).join("");
   hydrateImages();
   $("#messages").scrollTop = $("#messages").scrollHeight;
@@ -162,7 +167,20 @@ $("#refresh").addEventListener("click", refresh);
 $("#search").addEventListener("input", renderConversationList);
 document.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderConversationList(); }));
 $("#add-message").addEventListener("click", () => renderDrafts([...state.drafts, ""]));
-$("#regenerate").addEventListener("click", () => renderDrafts(draftsFor(active())));
+$("#regenerate").addEventListener("click", async () => {
+  const item = active();
+  const direction = $("#draft-direction").value.trim();
+  if (!item) return;
+  if (!direction) { setNotice("Add an informal direction first", true); return; }
+  const latestInbound = item.messages.filter((message) => message.direction === "inbound").at(-1);
+  try {
+    const response = await fetch("/approvals/api/regenerate", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, conversationId: item.id, sourceMessageId: latestInbound?.id || "", latestInboundText: latestInbound?.text || "", direction }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not request a refreshed draft");
+    setNotice("Refreshing recent work context and generating new message bubbles…");
+    window.setTimeout(() => refresh(), 4000);
+  } catch (error) { setNotice(error.message, true); }
+});
 $("#hold").addEventListener("click", () => setNotice("Held — nothing was sent"));
 $("#approve").addEventListener("click", async () => {
   const item = active();

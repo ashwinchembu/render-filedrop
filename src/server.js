@@ -1617,6 +1617,37 @@ app.post(
   }
 );
 
+app.post(
+  "/approvals/api/regenerate",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const recipient = cleanText(req.body?.recipient, 120);
+      const conversationId = cleanText(req.body?.conversationId, 160);
+      const sourceMessageId = cleanText(req.body?.sourceMessageId, 160);
+      const direction = cleanText(req.body?.direction, 2000);
+      const latestInboundText = cleanText(req.body?.latestInboundText, 4000);
+      if (!recipient || !conversationId || !direction) {
+        res.status(400).json({ error: "Recipient, conversation, and drafting direction are required" });
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      await createMessage({
+        from: "ashwin-main-codex",
+        to: "ashwin-remote-codex",
+        project: "Mindsight Campaign Implementation",
+        category: "DRAFT_REGENERATE",
+        tags: ["teams", "approval-desk", "context-refresh", "write-like-ashwin"],
+        body: JSON.stringify({ version: 1, type: "teams_draft_regenerate", requestId, recipient, conversationId, sourceMessageId, latestInboundText, direction })
+      });
+      res.status(202).json({ ok: true, requestId });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.post("/mcp", async (req, res, next) => {
   try {
     await handleMcpRequest(req, res);
