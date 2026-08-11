@@ -1699,7 +1699,8 @@ app.get(
   async (_req, res, next) => {
     try {
       const events = filterChannelMessages(await readChannelMessages("teams-approval-monitor"), {
-        channelId: "teams-approval-monitor"
+        channelId: "teams-approval-monitor",
+        from: "ashwin-remote-codex"
       })
         .slice(0, 1000)
         .map(publicChannelMessage);
@@ -1829,6 +1830,89 @@ app.post(
         body: `User approved reaction ${reaction} for ${recipient}. In Teams web, react to source message ${sourceMessageId}${messageText ? ` with visible text "${messageText}"` : ""}. Do not send a text reply. Report the exact reaction and timestamp after Teams confirms it.`
       });
       res.status(201).json({ ok: true, messageId: message.id });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.post(
+  "/approvals/api/task",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const recipient = cleanText(req.body?.recipient, 120);
+      const selected = req.body?.message || {};
+      const selectedText = cleanText(selected.text, 4000);
+      if (!selectedText) {
+        res.status(400).json({ error: "Select a message to start a task" });
+        return;
+      }
+      const taskId = crypto.randomUUID().replaceAll("-", "");
+      const tag = `task:${taskId}`;
+      const context = (Array.isArray(req.body?.context) ? req.body.context : [])
+        .slice(-8)
+        .map((item) => `[${cleanText(item?.createdAt || item?.timestamp, 120) || "unknown time"}] ${item?.direction === "outbound" ? "Ashwin" : cleanText(item?.sender, 120) || recipient || "Teammate"}: ${cleanText(item?.text, 2000)}`)
+        .join("\n");
+      const sourceMessageIds = (Array.isArray(req.body?.sourceMessageIds) ? req.body.sourceMessageIds : [])
+        .map((id) => cleanText(id, 100))
+        .filter(Boolean)
+        .slice(0, 100);
+      await createMessage({
+        from: "ashwin-main-codex",
+        to: "ashwin-remote-codex",
+        project: "Mindsight Campaign Implementation",
+        category: "CODEX_TASK",
+        tags: ["codex-task", tag],
+        body: `CODEX_TASK_REQUEST\nTask ID: ${taskId}\n\nCreate a fresh Codex task/chat and handle the actionable request in the selected message. Treat the conversation context as reference only; the selected message is authoritative. Do not send a Teams message or perform unrelated external actions unless the selected message explicitly requests it.\n\nSELECTED MESSAGE\nFrom: ${cleanText(selected.sender, 120) || recipient || "Teammate"}\nActual message timestamp: ${cleanText(selected.createdAt || selected.timestamp, 120) || "unknown"}\nText: ${selectedText}\n\nRECENT CONTEXT\n${context || "No additional context"}\n\nPROGRESS CALLBACKS\nPost updates to ashwin-main-codex with tag ${tag}. Use category CODEX_TASK_PROGRESS while working, CODEX_TASK_DONE with FINAL_RESPONSE when complete, CODEX_TASK_BLOCKED if user input is needed, or CODEX_TASK_FAILED on failure. Include the created Codex thread URL or ID when available.\n\nSource FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
+      });
+      const createdAt = new Date().toISOString();
+      res.status(201).json({ ok: true, task: { id: taskId, status: "queued", createdAt, progress: [{ timestamp: createdAt, text: "Task queued for Codex" }] } });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.get(
+  "/approvals/api/task",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const taskId = cleanText(req.query?.id, 80);
+      if (!taskId) {
+        res.status(400).json({ error: "Task ID is required" });
+        return;
+      }
+      const tag = `task:${taskId}`;
+      const rows = filterMessages(await readMailboxMessages(), {
+        to: "ashwin-main-codex",
+        from: "ashwin-remote-codex",
+        tag
+      }).filter((row) => String(row.body || "").includes(taskId) || (row.tags || []).includes(tag))
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      let status = "queued";
+      let finalResponse = "";
+      let threadUrl = "";
+      const progress = rows.map((row) => {
+        const category = String(row.category || "").toUpperCase();
+        const text = cleanText(row.body, 12000);
+        if (category.includes("DONE") || /CODEX_TASK_DONE/i.test(text)) status = "completed";
+        else if (category.includes("BLOCKED") || /CODEX_TASK_BLOCKED/i.test(text)) status = "blocked";
+        else if (category.includes("FAILED") || /CODEX_TASK_FAILED/i.test(text)) status = "failed";
+        else status = "running";
+        const finalMatch = text.match(/FINAL_RESPONSE\s*:?\s*([\s\S]+)/i);
+        if (finalMatch) finalResponse = finalMatch[1].trim();
+        const urlMatch = text.match(/https:\/\/[^\s]+|(?:thread|task)\s+(?:url|id)\s*:\s*([^\s]+)/i);
+        if (urlMatch) threadUrl = urlMatch[0].startsWith("http") ? urlMatch[0] : urlMatch[1] || "";
+        return {
+          timestamp: row.createdAt || new Date().toISOString(),
+          text: text.replace(/CODEX_TASK_(?:PROGRESS|DONE|BLOCKED|FAILED)/gi, "").replace(/FINAL_RESPONSE\s*:?/gi, "").trim()
+        };
+      });
+      res.json({ ok: true, task: { id: taskId, status, progress, response: finalResponse, threadUrl } });
     } catch (error) {
       next(error);
     }

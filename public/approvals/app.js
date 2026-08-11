@@ -1,13 +1,44 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], pendingReactions: [], sentDraftKeys: new Set(), generation: null, replyTarget: null };
+const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], pendingReactions: [], sentDraftKeys: new Set(), generation: null, replyTarget: null, task: null, taskSource: null, taskPoller: null };
 
 const escapeHtml = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const initials = (name) => name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 const displayTime = (value) => new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }).format(new Date(value));
+const zonedDateKey = (value) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "America/Los_Angeles" }).format(new Date(value));
+const displaySidebarTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value || "");
+  if (zonedDateKey(date) === zonedDateKey(new Date())) return displayTime(date);
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }).format(date);
+};
+const displayFullTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value || "");
+  const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" }).format(date);
+  return `${day} · ${displayTime(date)}`;
+};
+const cleanMessageText = (value) => String(value || "")
+  .replace(/�\?T/g, "'")
+  .replace(/â€™/g, "’")
+  .replace(/â€˜/g, "‘")
+  .replace(/â€œ|â€/g, '"')
+  .replace(/â€”/g, "—")
+  .replace(/â€“/g, "–")
+  .replace(/â€¢/g, "•")
+  .replace(/â€¦/g, "…")
+  .replace(/Â(?=\s|$)/g, "")
+  .trim();
+const extractReaction = (value) => {
+  const text = cleanMessageText(value);
+  const match = text.match(/(?:\s+|^)(\d+)\s+(Like|Heart|Laugh|Surprised|Sad|Angry) reaction(?: with [^.]+)?\.?\s*$/i);
+  if (!match) return { text, reaction: "" };
+  const emoji = { like: "👍", heart: "❤️", laugh: "😂", surprised: "😮", sad: "😢", angry: "😠" };
+  return { text: text.slice(0, match.index).trim(), reaction: `${emoji[match[2].toLowerCase()] || "•"} ${match[1]}` };
+};
 const keyFor = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
 function parseReport(row) {
-  const body = String(row.body || "");
+  const body = cleanMessageText(row.body);
   if (!/Latest inbound messages from|Exact visible context and latest relevant messages from|RAW(?:\s+KILIAN|\s+TEAMS|\s+MESSAGE|\s+THREAD)|(?:sent|message)\s+(?:in|to)\s+.+?Teams|Teams (?:chat|message)/i.test(body)) return null;
   const entries = [...body.matchAll(/\[([^\]]+)\]\s*["“]([^"”]+)["”]/g)];
   const explicit = body.match(/Latest inbound messages from\s+([^:]+):/i)?.[1]?.trim()
@@ -19,17 +50,21 @@ function parseReport(row) {
       const parts = match[1].split(",").map((part) => part.trim());
       const sender = parts.length > 1 ? parts.at(-1) : person;
       const outbound = /ashwin/i.test(sender);
-      return { id: `${row.id}-${index}`, sender: outbound ? "You" : sender, timestamp: (parts.length > 1 ? parts.slice(0, -1).join(", ") : parts[0]).replace(/\s*PDT$/i, ""), createdAt: row.createdAt, text: match[2], direction: outbound ? "outbound" : "inbound", deliveryStatus: outbound ? "Sent in Teams" : "" };
+      const timestamp = (parts.length > 1 ? parts.slice(0, -1).join(", ") : parts[0]).replace(/\s*PDT$/i, "");
+      const reaction = extractReaction(match[2]);
+      return { id: `${row.id}-${index}`, sender: outbound ? "You" : cleanMessageText(sender), timestamp, createdAt: row.createdAt, text: reaction.text, reaction: reaction.reaction, direction: outbound ? "outbound" : "inbound", deliveryStatus: outbound ? "Sent in Teams" : "" };
     }) };
   }
   const sent = body.match(/Sent to\s+(.+?)\s+at\s+[^:]+:\s*["“]([\s\S]*?)["”](?:\s|$)/i)
     || body.match(/Teams message sent(?: once)? to\s+([^.;\n]+)[\s\S]*?Exact text:\s*["“]?([^"”\n]+)["”]?/i);
   if (sent) person = sent[1].trim();
   const exact = body.match(/Sent exactly\s+["“]?(.+?)["”]?\s+to\s+(.+?)\s+in Teams/i);
-  if (exact) return { person: exact[2].trim(), messages: [{ id: row.id, sender: "You", timestamp: displayTime(row.createdAt), createdAt: row.createdAt, text: exact[1].trim(), direction: "outbound", deliveryStatus: "Sent in Teams" }] };
-  if (sent) return { person, messages: [{ id: row.id, sender: "You", timestamp: displayTime(row.createdAt), createdAt: row.createdAt, text: sent[2].trim(), direction: "outbound", deliveryStatus: "Sent in Teams" }] };
+  if (exact) return { person: cleanMessageText(exact[2]), messages: [{ id: row.id, sender: "You", timestamp: displayFullTime(row.createdAt), createdAt: row.createdAt, text: cleanMessageText(exact[1]), direction: "outbound", deliveryStatus: "Sent in Teams" }] };
+  if (sent) return { person: cleanMessageText(person), messages: [{ id: row.id, sender: "You", timestamp: displayFullTime(row.createdAt), createdAt: row.createdAt, text: cleanMessageText(sent[2]), direction: "outbound", deliveryStatus: "Sent in Teams" }] };
   const raw = body.match(/^RAW(?:\s+KILIAN|\s+TEAMS|\s+MESSAGE|\s+THREAD)[^\n]*\n([\s\S]+)/im);
-  return raw && person ? { person, messages: [{ id: row.id, sender: person, timestamp: displayTime(row.createdAt), createdAt: row.createdAt, text: raw[1].trim(), direction: "inbound" }] } : null;
+  if (!raw || !person) return null;
+  const reaction = extractReaction(raw[1]);
+  return { person: cleanMessageText(person), messages: [{ id: row.id, sender: cleanMessageText(person), timestamp: displayFullTime(row.createdAt), createdAt: row.createdAt, text: reaction.text, reaction: reaction.reaction, direction: "inbound" }] };
 }
 
 function parseStructured(row) {
@@ -38,19 +73,22 @@ function parseStructured(row) {
   if (event?.version !== 1 || !["teams_message", "teams_draft_update"].includes(event?.type) || !event.conversationName) return null;
   if (event.type === "teams_message" && !event.text) return null;
   const direction = event.direction === "outbound" ? "outbound" : "inbound";
+  const occurredAt = event.timestamp || row.createdAt;
+  const message = extractReaction(event.text);
   return {
-    person: String(event.conversationName),
+    person: cleanMessageText(event.conversationName),
     conversationId: String(event.conversationId || ""),
-    suggestedDrafts: Array.isArray(event.suggestedDrafts) ? event.suggestedDrafts.map(String).filter((text) => text.trim()) : (event.suggestedDraft ? [String(event.suggestedDraft)] : []),
+    suggestedDrafts: Array.isArray(event.suggestedDrafts) ? event.suggestedDrafts.map(cleanMessageText).filter((text) => text.trim()) : (event.suggestedDraft ? [cleanMessageText(event.suggestedDraft)] : []),
     sensitivity: event.sensitivity === "sensitive" ? "sensitive" : "ordinary",
-    recentWorkContext: String(event.recentWorkContext || ""),
+    recentWorkContext: cleanMessageText(event.recentWorkContext),
     isDraftUpdate: event.type === "teams_draft_update",
     messages: event.type === "teams_draft_update" ? [] : [{
       id: String(event.sourceMessageId || row.id),
-      sender: direction === "outbound" ? "You" : String(event.sender || event.conversationName),
-      timestamp: event.timestamp ? displayTime(event.timestamp) : displayTime(row.createdAt),
-      createdAt: event.timestamp || row.createdAt,
-      text: String(event.text),
+      sender: direction === "outbound" ? "You" : cleanMessageText(event.sender || event.conversationName),
+      timestamp: displayFullTime(occurredAt),
+      createdAt: occurredAt,
+      text: message.text || (message.reaction ? "[reaction]" : ""),
+      reaction: message.reaction,
       direction,
       deliveryStatus: direction === "outbound" ? "Sent in Teams" : "",
       imageFileIds: Array.isArray(event.imageFileIds) ? event.imageFileIds.map(String).filter(Boolean) : (row.relatedFileId ? [row.relatedFileId] : [])
@@ -60,21 +98,29 @@ function parseStructured(row) {
 
 function makeConversations(rows, structured = false) {
   const map = new Map();
-  [...rows].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).forEach((row) => {
-    const parsed = structured ? parseStructured(row) : parseReport(row);
-    if (!parsed) return;
+  const parsedRows = rows.map((row) => ({ row, parsed: structured ? parseStructured(row) : parseReport(row) })).filter(({ parsed }) => parsed);
+  parsedRows.sort((a, b) => String(a.parsed.messages.at(-1)?.createdAt || a.row.createdAt).localeCompare(String(b.parsed.messages.at(-1)?.createdAt || b.row.createdAt))).forEach(({ row, parsed }) => {
     const id = parsed.conversationId ? keyFor(parsed.conversationId) : keyFor(parsed.person);
-    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDrafts: [], sensitivity: "ordinary", recentWorkContext: "" };
-    item.messages.push(...parsed.messages);
-    item.unread += parsed.messages.filter((message) => message.direction === "inbound").length;
+    const item = map.get(id) || { id, person: parsed.person, messages: [], unread: 0, sourceMessageIds: [], lastSeen: "", lastOccurredAt: "", priority: /kilian/i.test(parsed.person) ? "high" : "normal", suggestedDrafts: [], sensitivity: "ordinary", recentWorkContext: "", seenMessageIds: new Set() };
+    parsed.messages.forEach((message) => {
+      if (item.seenMessageIds.has(message.id)) return;
+      item.seenMessageIds.add(message.id);
+      item.messages.push(message);
+      if (message.direction === "inbound") item.unread += 1;
+    });
     item.sourceMessageIds.push(row.id);
-    item.lastSeen = displayTime(row.createdAt);
     if (parsed.suggestedDrafts?.length) item.suggestedDrafts = parsed.suggestedDrafts;
     if (parsed.recentWorkContext) item.recentWorkContext = parsed.recentWorkContext;
     if (parsed.sensitivity === "sensitive") item.sensitivity = "sensitive";
     map.set(id, item);
   });
-  return [...map.values()].reverse();
+  return [...map.values()].map((item) => {
+    item.messages.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+    item.lastOccurredAt = item.messages.at(-1)?.createdAt || "";
+    item.lastSeen = displaySidebarTime(item.lastOccurredAt);
+    delete item.seenMessageIds;
+    return item;
+  }).sort((a, b) => new Date(b.lastOccurredAt || 0) - new Date(a.lastOccurredAt || 0));
 }
 
 function draftsFor(conversation) {
@@ -185,6 +231,97 @@ async function reactToMessage(item, message, reaction) {
   } catch (error) { setNotice(error.message, true); }
 }
 
+function groupMessages(messages) {
+  return messages.reduce((groups, message, index) => {
+    const previousGroup = groups.at(-1);
+    const previous = previousGroup?.messages.at(-1)?.message;
+    const currentTime = new Date(message.createdAt || 0).valueOf();
+    const previousTime = new Date(previous?.createdAt || 0).valueOf();
+    const closeInTime = Number.isFinite(currentTime) && Number.isFinite(previousTime) && currentTime - previousTime <= 5 * 60_000;
+    if (previousGroup && previousGroup.sender === message.sender && previousGroup.direction === message.direction && closeInTime) {
+      previousGroup.messages.push({ message, index });
+      return groups;
+    }
+    groups.push({ id: message.id, sender: message.sender, direction: message.direction, messages: [{ message, index }] });
+    return groups;
+  }, []);
+}
+
+function switchSideMode(mode) {
+  const taskMode = mode === "task";
+  $("#reply-panel").hidden = taskMode;
+  $("#task-panel").hidden = !taskMode;
+  $("#reply-tab").classList.toggle("active", !taskMode);
+  $("#task-tab").classList.toggle("active", taskMode);
+  $("#reply-tab").setAttribute("aria-selected", String(!taskMode));
+  $("#task-tab").setAttribute("aria-selected", String(taskMode));
+}
+
+function renderTask() {
+  const task = state.task;
+  $("#task-tab-dot").hidden = !task;
+  $("#task-tab-dot").className = `task-dot ${task?.status || ""}`;
+  if (!task) {
+    $("#task-status").hidden = true;
+    $("#task-heading").textContent = "No task running";
+    $("#task-content").innerHTML = '<div class="task-empty"><span>▷</span><strong>Choose a message to handle</strong><p>Select “Do task” under an inbound message. Its exact text and recent chat context will be passed to a fresh Codex task.</p></div>';
+    return;
+  }
+  $("#task-status").hidden = false;
+  $("#task-status").textContent = task.status;
+  $("#task-status").className = `task-status ${task.status}`;
+  $("#task-heading").textContent = "Task progress";
+  const source = state.taskSource || {};
+  const progress = task.progress?.length
+    ? `<ol class="progress-list">${task.progress.map((item, index) => `<li><span class="progress-mark">${index === task.progress.length - 1 && !["completed", "blocked", "failed"].includes(task.status) ? "◌" : "✓"}</span><div><time>${escapeHtml(displayTime(item.timestamp))}</time><p>${escapeHtml(cleanMessageText(item.text || "Progress received"))}</p></div></li>`).join("")}</ol>`
+    : '<ol class="progress-list"><li><span class="progress-mark">◌</span><div><time>now</time><p>Waiting for the worker to acknowledge the task</p></div></li></ol>';
+  const response = task.response ? `<div class="task-response ${task.status}"><p class="eyebrow">${task.status === "completed" ? "FINAL RESPONSE" : "TASK UPDATE"}</p><div>${escapeHtml(cleanMessageText(task.response))}</div></div>` : "";
+  const thread = task.threadUrl && /^https:\/\//i.test(task.threadUrl) ? `<a class="thread-link" href="${escapeHtml(task.threadUrl)}" target="_blank" rel="noreferrer">Open Codex task ↗</a>` : "";
+  $("#task-content").innerHTML = `<div class="task-source"><p class="eyebrow">SOURCE MESSAGE · ${escapeHtml(source.timestamp || "")}</p><strong>${escapeHtml(source.sender || active()?.person || "Teammate")}</strong><p>${escapeHtml(source.text || "")}</p></div>${progress}${response}${thread}`;
+}
+
+async function pollTask() {
+  if (!state.task?.id || ["completed", "blocked", "failed"].includes(state.task.status)) return;
+  try {
+    const response = await fetch(`/approvals/api/task?id=${encodeURIComponent(state.task.id)}`, { headers: { "x-upload-password": state.password }, cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok || !payload.task) throw new Error(payload.error || "Could not read task");
+    state.task = payload.task;
+    renderTask();
+    if (["completed", "blocked", "failed"].includes(state.task.status) && state.taskPoller) {
+      clearInterval(state.taskPoller);
+      state.taskPoller = null;
+    }
+  } catch { /* Keep current progress and retry. */ }
+}
+
+async function startTask(item, message) {
+  switchSideMode("task");
+  state.taskSource = message;
+  state.task = { id: "", status: "queued", progress: [{ timestamp: new Date().toISOString(), text: "Starting task…" }] };
+  renderTask();
+  document.querySelectorAll("[data-task-message]").forEach((button) => { button.disabled = true; button.textContent = "Starting…"; });
+  try {
+    const response = await fetch("/approvals/api/task", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-upload-password": state.password },
+      body: JSON.stringify({ recipient: item.person, message, context: item.messages, sourceMessageIds: item.sourceMessageIds })
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok || !payload.task) throw new Error(payload.error || "Could not start task");
+    state.task = payload.task;
+    renderTask();
+    if (state.taskPoller) clearInterval(state.taskPoller);
+    state.taskPoller = setInterval(pollTask, 4000);
+    pollTask();
+  } catch (error) {
+    state.task = { id: "", status: "failed", progress: [], response: error.message || "Could not start task" };
+    renderTask();
+  } finally {
+    document.querySelectorAll("[data-task-message]").forEach((button) => { button.disabled = false; button.textContent = "Do task"; });
+  }
+}
+
 function renderConversationList() {
   const query = $("#search").value.trim().toLowerCase();
   const visible = state.conversations.filter((item) => state.filter === "all" || item.unread > 0).filter((item) => !query || `${item.person} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(query));
@@ -205,13 +342,18 @@ function selectConversation(id) {
   $("#chat-name").textContent = item.person;
   $("#sensitive-banner").hidden = item.sensitivity !== "sensitive";
   $("#work-context").textContent = item.recentWorkContext || "No refreshed work context was provided yet. Regenerate to request a fresh check.";
-  $("#messages").innerHTML = item.messages.map((message, messageIndex) => {
-    const deliveryStatus = message.deliveryStatus === "Sent in Teams" ? `Sent to ${item.person} in Teams` : message.deliveryStatus;
-    const reactions = state.pendingReactions.filter((pending) => pending.conversationId === item.id && pending.sourceMessageId === message.id);
-    return `<article class="message ${message.direction} ${message.pending ? "pending" : ""}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div>${message.replyToText ? `<div class="reply-preview">Replying to: ${escapeHtml(message.replyToText)}</div>` : ""}<div class="bubble">${escapeHtml(message.text)}</div>${deliveryStatus ? `<small class="delivery-status">${escapeHtml(deliveryStatus)}</small>` : ""}${reactions.length ? `<div class="reaction-row">${reactions.map((pending) => `<span class="reaction-chip pending" title="Queued for Windows Teams sender">${escapeHtml(pending.reaction)}</span>`).join("")}</div>` : ""}<div class="message-actions"><button data-reply-message="${messageIndex}">Reply</button><button data-react-message="${messageIndex}" data-reaction="👍" aria-label="Like">👍</button><button data-react-message="${messageIndex}" data-reaction="❤️" aria-label="Heart">❤️</button><button data-react-message="${messageIndex}" data-reaction="😂" aria-label="Laugh">😂</button></div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`;
+  $("#messages").innerHTML = groupMessages(item.messages).map((group) => {
+    const first = group.messages[0].message;
+    const blocks = group.messages.map(({ message, index }) => {
+      const deliveryStatus = message.deliveryStatus === "Sent in Teams" ? `Sent to ${item.person} in Teams` : message.deliveryStatus;
+      const reactions = state.pendingReactions.filter((pending) => pending.conversationId === item.id && pending.sourceMessageId === message.id);
+      return `<div class="message-block">${message.replyToText ? `<div class="reply-preview">Replying to: ${escapeHtml(message.replyToText)}</div>` : ""}<div class="bubble">${escapeHtml(message.text)}</div>${message.reaction ? `<span class="reaction-pill">${escapeHtml(message.reaction)}</span>` : ""}${deliveryStatus ? `<small class="delivery-status">${escapeHtml(deliveryStatus)}</small>` : ""}${reactions.length ? `<div class="reaction-row">${reactions.map((pending) => `<span class="reaction-chip pending" title="Queued for Windows Teams sender">${escapeHtml(pending.reaction)}</span>`).join("")}</div>` : ""}${message.direction === "inbound" ? `<button class="task-trigger" data-task-message="${index}">Do task</button>` : ""}<div class="message-actions"><button data-reply-message="${index}">Reply</button><button data-react-message="${index}" data-reaction="👍" aria-label="Like">👍</button><button data-react-message="${index}" data-reaction="❤️" aria-label="Heart">❤️</button><button data-react-message="${index}" data-reaction="😂" aria-label="Laugh">😂</button></div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div>`;
+    }).join("");
+    return `<article class="message ${group.direction} ${group.messages.some(({ message }) => message.pending) ? "pending" : ""}">${group.direction === "inbound" ? `<span class="avatar">${initials(group.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(group.sender)}</strong><time datetime="${escapeHtml(first.createdAt)}">${escapeHtml(displayFullTime(first.createdAt) || first.timestamp)}</time></div><div class="message-cluster">${blocks}</div></div></article>`;
   }).join("");
   document.querySelectorAll("[data-reply-message]").forEach((button) => button.addEventListener("click", () => setReplyTarget(item, item.messages[Number(button.dataset.replyMessage)])));
   document.querySelectorAll("[data-react-message]").forEach((button) => button.addEventListener("click", () => reactToMessage(item, item.messages[Number(button.dataset.reactMessage)], button.dataset.reaction)));
+  document.querySelectorAll("[data-task-message]").forEach((button) => button.addEventListener("click", () => startTask(item, item.messages[Number(button.dataset.taskMessage)])));
   hydrateImages();
   $("#messages").scrollTop = $("#messages").scrollHeight;
   renderDrafts(draftsFor(item));
@@ -368,6 +510,9 @@ $("#manual-reply").addEventListener("keydown", (event) => {
   event.preventDefault();
   $("#send-manual").click();
 });
+$("#reply-tab").addEventListener("click", () => switchSideMode("reply"));
+$("#task-tab").addEventListener("click", () => switchSideMode("task"));
 
+renderTask();
 refresh();
 setInterval(refresh, 30000);

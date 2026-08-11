@@ -31,16 +31,23 @@
         <div class="locked">Your message is queued for the Windows Teams sender <span>🔒</span></div>
       </section>
       <aside class="draft">
-        <header><div><p class="eyebrow">READY TO REVIEW</p><h2>Draft messages</h2></div><span class="badge">Context checked</span></header>
-        <div class="work-context"><span>Latest verified work context</span><p id="work-context">Waiting for the Windows monitor to provide current task context.</p></div>
-        <div id="draft-preview" class="draft-preview"></div>
-        <label class="quick-prompt-label" for="draft-direction-quick">What do you want to say?</label>
-        <div class="quick-prompt-row"><input id="draft-direction-quick" class="quick-prompt" type="text" placeholder="Describe the reply in your own words" /><button id="generate-quick" type="button">Generate</button></div>
-        <div class="tools"><span id="count">0 messages</span></div>
-        <div class="approval"><b>✓</b><div><strong>You control what is sent</strong><p>Nothing is sent until you approve it.</p></div></div>
-        <button id="approve" class="approve" disabled>Send all in Teams</button>
-        <button id="hold" class="hold">Save for later</button>
-        <p id="notice" class="notice" hidden></p>
+        <div class="side-tabs" role="tablist" aria-label="Action panel"><button id="reply-tab" class="active" role="tab" aria-selected="true">Reply</button><button id="task-tab" role="tab" aria-selected="false">Task run<span id="task-tab-dot" class="task-dot" hidden></span></button></div>
+        <section id="reply-panel">
+          <header><div><p class="eyebrow">READY TO REVIEW</p><h2>Draft messages</h2></div><span class="badge">Context checked</span></header>
+          <div class="work-context"><span>Latest verified work context</span><p id="work-context">Waiting for the Windows monitor to provide current task context.</p></div>
+          <div id="draft-preview" class="draft-preview"></div>
+          <label class="quick-prompt-label" for="draft-direction-quick">What do you want to say?</label>
+          <div class="quick-prompt-row"><input id="draft-direction-quick" class="quick-prompt" type="text" placeholder="Describe the reply in your own words" /><button id="generate-quick" type="button">Generate</button></div>
+          <div class="tools"><span id="count">0 messages</span></div>
+          <div class="approval"><b>✓</b><div><strong>You control what is sent</strong><p>Nothing is sent until you approve it.</p></div></div>
+          <button id="approve" class="approve" disabled>Send all in Teams</button>
+          <button id="hold" class="hold">Save for later</button>
+          <p id="notice" class="notice" hidden></p>
+        </section>
+        <section id="task-panel" class="task-panel" hidden aria-live="polite">
+          <header><div><p class="eyebrow">CODEX TASK</p><h2 id="task-heading">No task running</h2></div><span id="task-status" class="task-status" hidden></span></header>
+          <div id="task-content"><div class="task-empty"><span>▷</span><strong>Choose a message to handle</strong><p>Select “Do task” under an inbound message. Its exact text and recent chat context will be passed to a fresh Codex task.</p></div></div>
+        </section>
       </aside>
     </main>
     <dialog id="auth-modal" class="auth-modal">

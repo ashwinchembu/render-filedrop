@@ -20,3 +20,47 @@
 .chat-composer button:disabled { opacity: .45; }
 .chat .locked { height: auto; min-height: 30px; margin-bottom: 12px; border: 0; color: #858a99; }
 @media (hover: none) { .message-actions { opacity: 1; } }
+
+.message-cluster { display: grid; gap: 5px; }
+.message { align-items: flex-start; margin: 20px 0; }
+.message-block { position: relative; }
+.message-cluster .bubble { border-radius: 6px 13px 13px 6px; }
+.message-cluster .message-block:first-child .bubble { border-top-left-radius: 13px; }
+.message-cluster .message-block:last-child .bubble { border-bottom-left-radius: 13px; }
+.outbound .message-cluster .bubble { border-radius: 13px 6px 6px 13px; }
+.outbound .message-cluster .message-block:first-child .bubble { border-top-right-radius: 13px; }
+.outbound .message-cluster .message-block:last-child .bubble { border-bottom-right-radius: 13px; }
+.reaction-pill { position: relative; z-index: 1; display: table; margin: -5px 8px 0 auto; padding: 2px 7px; border: 1px solid #dddfe7; border-radius: 99px; color: #5e6371; background: #fff; box-shadow: 0 1px 3px rgba(31,35,60,.08); font-size: 9px; font-weight: 800; }
+.outbound .reaction-pill { margin-right: auto; margin-left: 8px; }
+.task-trigger { display: inline-flex; align-items: center; margin: 6px 3px 0; padding: 5px 9px; border: 1px solid #d9daea; border-radius: 7px; color: var(--teams); background: #fff; font-size: 10px; font-weight: 800; }
+.task-trigger:hover { background: #f1f1fb; }
+.task-trigger:disabled { cursor: wait; opacity: .55; }
+
+.side-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 4px; margin-bottom: 20px; border: 1px solid #e2e3ea; border-radius: 10px; background: #f3f3f7; }
+.side-tabs button { position: relative; padding: 8px 10px; border: 0; border-radius: 7px; color: #747989; background: transparent; font-size: 11px; font-weight: 750; }
+.side-tabs button.active { color: var(--teams); background: #fff; box-shadow: 0 1px 5px rgba(31,35,65,.1); }
+.task-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #d99a2b; }
+.task-dot[hidden] { display: none !important; }
+.task-dot.completed { background: #1e9875; }
+.task-dot.blocked,.task-dot.failed { background: #c85145; }
+.task-panel > header { margin-bottom: 17px; }
+.task-status { padding: 6px 9px; border-radius: 99px; color: #845c18; background: #fae8ca; font-size: 9px; font-weight: 850; text-transform: uppercase; letter-spacing: .6px; }
+.task-status.completed { color: #126d58; background: #dff7ee; }
+.task-status.blocked,.task-status.failed { color: #9b4034; background: #fde2dd; }
+.task-empty { min-height: 280px; display: grid; place-items: center; align-content: center; padding: 30px 18px; border: 1px dashed #d9dbe5; border-radius: 12px; background: #fff; text-align: center; }
+.task-empty > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: #fff; background: var(--teams); font-size: 20px; }
+.task-empty strong { margin-top: 13px; font-size: 13px; }
+.task-empty p { max-width: 260px; margin: 7px 0 0; color: #7b8090; font-size: 10px; line-height: 1.5; }
+.task-source { padding: 13px; margin-bottom: 16px; border: 1px solid #e2e3ec; border-radius: 10px; background: #fff; }
+.task-source > strong { display: block; margin-top: 6px; font-size: 11px; }
+.task-source > p:last-child { margin: 5px 0 0; color: #565b69; font-size: 11px; line-height: 1.5; }
+.progress-list { list-style: none; padding: 0; margin: 0 0 16px; display: grid; }
+.progress-list li { position: relative; display: grid; grid-template-columns: 25px 1fr; gap: 9px; padding-bottom: 14px; }
+.progress-list li:not(:last-child)::after { content: ""; position: absolute; left: 12px; top: 22px; bottom: 0; width: 1px; background: #dedfe8; }
+.progress-mark { z-index: 1; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--teams); font-size: 10px; }
+.progress-list time { color: #9296a4; font-size: 9px; }
+.progress-list p { margin: 2px 0 0; color: #545967; font-size: 11px; line-height: 1.45; }
+.task-response { padding: 14px; border: 1px solid #dcefe8; border-radius: 10px; color: #265a4e; background: #f4faf8; }
+.task-response.blocked,.task-response.failed { border-color: #f0d7d3; color: #843d34; background: #fff5f3; }
+.task-response > div { margin-top: 7px; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.thread-link { display: block; margin-top: 10px; padding: 10px; border-radius: 8px; color: var(--teams); background: #eeeeff; text-align: center; text-decoration: none; font-size: 11px; font-weight: 800; }
