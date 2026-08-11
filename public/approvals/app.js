@@ -149,6 +149,7 @@ async function refresh() {
     state.conversations = [...pushed, ...legacy.filter((item) => !pushedPeople.has(item.person.toLowerCase()))];
     if (!state.conversations.some((item) => item.id === state.activeId)) state.activeId = state.conversations[0]?.id || "";
     $("#status").classList.add("connected");
+    $(".auth").hidden = true;
     $("#status strong").textContent = "FileDrop connected";
     $("#status small").textContent = `last checked ${displayTime(payload.syncedAt)}`;
     renderConversationList();
