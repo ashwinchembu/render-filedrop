@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], sentDraftKeys: new Set(), generation: null };
+const state = { conversations: [], activeId: "", filter: "unread", password: "", drafts: [], pendingSends: [], pendingReactions: [], sentDraftKeys: new Set(), generation: null, replyTarget: null };
 
 const escapeHtml = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const initials = (name) => name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
@@ -167,6 +167,24 @@ function setGenerationBusy(busy, text = "Generating updated messages…") {
   $("#generate-quick").disabled = busy;
 }
 
+function setReplyTarget(item, message) {
+  state.replyTarget = message ? { conversationId: item.id, sourceMessageId: message.id, text: message.text, sender: message.sender } : null;
+  $("#reply-context").hidden = !state.replyTarget;
+  $("#reply-context-text").textContent = state.replyTarget ? `${state.replyTarget.sender}: ${state.replyTarget.text}` : "";
+  if (state.replyTarget) $("#manual-reply").focus();
+}
+
+async function reactToMessage(item, message, reaction) {
+  try {
+    const response = await fetch("/approvals/api/react", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, sourceMessageId: message.id, messageText: message.text, reaction }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not queue reaction");
+    state.pendingReactions.push({ id: payload.messageId, conversationId: item.id, sourceMessageId: message.id, reaction });
+    selectConversation(item.id);
+    setNotice(`${reaction} queued for ${item.person}'s message`);
+  } catch (error) { setNotice(error.message, true); }
+}
+
 function renderConversationList() {
   const query = $("#search").value.trim().toLowerCase();
   const visible = state.conversations.filter((item) => state.filter === "all" || item.unread > 0).filter((item) => !query || `${item.person} ${item.messages.map((m) => m.text).join(" ")}`.toLowerCase().includes(query));
@@ -181,15 +199,19 @@ function renderConversationList() {
 function selectConversation(id) {
   state.activeId = id;
   const item = active();
+  if (state.replyTarget?.conversationId !== item.id) setReplyTarget(item, null);
   renderConversationList();
   $("#chat-avatar").textContent = initials(item.person);
   $("#chat-name").textContent = item.person;
   $("#sensitive-banner").hidden = item.sensitivity !== "sensitive";
   $("#work-context").textContent = item.recentWorkContext || "No refreshed work context was provided yet. Regenerate to request a fresh check.";
-  $("#messages").innerHTML = item.messages.map((message) => {
+  $("#messages").innerHTML = item.messages.map((message, messageIndex) => {
     const deliveryStatus = message.deliveryStatus === "Sent in Teams" ? `Sent to ${item.person} in Teams` : message.deliveryStatus;
-    return `<article class="message ${message.direction} ${message.pending ? "pending" : ""}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div><div class="bubble">${escapeHtml(message.text)}</div>${deliveryStatus ? `<small class="delivery-status">${escapeHtml(deliveryStatus)}</small>` : ""}${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`;
+    const reactions = state.pendingReactions.filter((pending) => pending.conversationId === item.id && pending.sourceMessageId === message.id);
+    return `<article class="message ${message.direction} ${message.pending ? "pending" : ""}">${message.direction === "inbound" ? `<span class="avatar">${initials(message.sender)}</span>` : ""}<div class="message-body"><div class="message-meta"><strong>${escapeHtml(message.sender)}</strong><time>${escapeHtml(message.timestamp)}</time></div>${message.replyToText ? `<div class="reply-preview">Replying to: ${escapeHtml(message.replyToText)}</div>` : ""}<div class="bubble">${escapeHtml(message.text)}</div>${deliveryStatus ? `<small class="delivery-status">${escapeHtml(deliveryStatus)}</small>` : ""}${reactions.length ? `<div class="reaction-row">${reactions.map((pending) => `<span class="reaction-chip pending" title="Queued for Windows Teams sender">${escapeHtml(pending.reaction)}</span>`).join("")}</div>` : ""}<div class="message-actions"><button data-reply-message="${messageIndex}">Reply</button><button data-react-message="${messageIndex}" data-reaction="👍" aria-label="Like">👍</button><button data-react-message="${messageIndex}" data-reaction="❤️" aria-label="Heart">❤️</button><button data-react-message="${messageIndex}" data-reaction="😂" aria-label="Laugh">😂</button></div>${(message.imageFileIds || []).map((fileId) => `<div class="image-card"><img data-image-id="${escapeHtml(fileId)}" alt="Teams screenshot" /><small>Screenshot · ${escapeHtml(fileId)}</small></div>`).join("")}</div></article>`;
   }).join("");
+  document.querySelectorAll("[data-reply-message]").forEach((button) => button.addEventListener("click", () => setReplyTarget(item, item.messages[Number(button.dataset.replyMessage)])));
+  document.querySelectorAll("[data-react-message]").forEach((button) => button.addEventListener("click", () => reactToMessage(item, item.messages[Number(button.dataset.reactMessage)], button.dataset.reaction)));
   hydrateImages();
   $("#messages").scrollTop = $("#messages").scrollHeight;
   renderDrafts(draftsFor(item));
@@ -304,17 +326,18 @@ $("#save-draft").addEventListener("click", () => { renderDrafts(state.drafts); $
 $("#add-message").addEventListener("click", () => renderDrafts([...state.drafts, ""]));
 $("#regenerate").addEventListener("click", () => requestRegeneration($("#draft-direction").value.trim()));
 $("#hold").addEventListener("click", () => setNotice("Saved for later — nothing was sent"));
-async function approveDrafts(drafts) {
+async function approveDrafts(drafts, options = {}) {
   const item = active();
-  if (!item || !drafts.length || drafts.some((text) => !text.trim())) return;
+  if (!item || !drafts.length || drafts.some((text) => !text.trim())) return false;
+  let queued = false;
   $("#approve").disabled = true;
   try {
-    const response = await fetch("/approvals/api/approve", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, drafts: drafts.map((text) => text.trim()), sourceMessageIds: item.sourceMessageIds }) });
+    const response = await fetch("/approvals/api/approve", { method: "POST", headers: { "content-type": "application/json", "x-upload-password": state.password }, body: JSON.stringify({ recipient: item.person, drafts: drafts.map((text) => text.trim()), sourceMessageIds: item.sourceMessageIds, replyToSourceMessageId: options.replyToSourceMessageId || "", replyToText: options.replyToText || "" }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not queue reply");
     const createdAt = new Date().toISOString();
     drafts.forEach((text) => state.sentDraftKeys.add(draftKey(item, text)));
-    drafts.forEach((text, index) => state.pendingSends.push({ id: `pending-${payload.messageId}-${index}`, conversationId: item.id, recipient: item.person, sender: "You", text: text.trim(), direction: "outbound", timestamp: displayTime(createdAt), createdAt, pending: true, deliveryStatus: "Queued for Windows Teams sender" }));
+    drafts.forEach((text, index) => state.pendingSends.push({ id: `pending-${payload.messageId}-${index}`, conversationId: item.id, recipient: item.person, sender: "You", text: text.trim(), direction: "outbound", timestamp: displayTime(createdAt), createdAt, pending: true, deliveryStatus: "Queued for Windows Teams sender", replyToText: options.replyToText || "" }));
     attachPendingSends();
     renderDrafts(state.drafts);
     selectConversation(item.id);
@@ -322,11 +345,28 @@ async function approveDrafts(drafts) {
     window.setTimeout(refresh, 2500);
     window.setTimeout(refresh, 8000);
     window.setTimeout(refresh, 20000);
+    queued = true;
   } catch (error) { setNotice(error.message, true); }
   updateCount();
+  return queued;
 }
 $("#approve").addEventListener("click", async () => {
   await approveDrafts(state.drafts);
+});
+$("#clear-reply").addEventListener("click", () => setReplyTarget(active(), null));
+$("#send-manual").addEventListener("click", async () => {
+  const text = $("#manual-reply").value.trim();
+  if (!text) return;
+  const replyTarget = state.replyTarget;
+  const queued = await approveDrafts([text], { replyToSourceMessageId: replyTarget?.sourceMessageId || "", replyToText: replyTarget?.text || "" });
+  if (!queued) return;
+  $("#manual-reply").value = "";
+  setReplyTarget(active(), null);
+});
+$("#manual-reply").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  $("#send-manual").click();
 });
 
 refresh();

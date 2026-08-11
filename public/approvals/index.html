@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/approvals/images.css" />
     <link rel="stylesheet" href="/approvals/auth.css" />
     <link rel="stylesheet" href="/approvals/draft-modal.css" />
+    <link rel="stylesheet" href="/approvals/chat-interactions.css" />
   </head>
   <body>
     <main class="shell">
@@ -25,7 +26,9 @@
         <div class="context"><b>✓</b><div><strong>Project context loaded</strong><small>Kite/Gilead Medical Account Plan · mapping, UAT, live validation</small></div></div>
         <div id="sensitive-banner" class="sensitive-banner" hidden><b>!</b><div><strong>Sensitive file or content</strong><small>Do not send through FileDrop or as a Teams attachment. Use only the approved ChatGPT workspace route—or do not share it.</small></div></div>
         <div id="messages" class="messages"><p class="empty">Waiting for messages</p></div>
-        <div class="locked">Replies are sent only after approval <span>🔒</span></div>
+        <div id="reply-context" class="reply-context" hidden><div><small>Replying to</small><strong id="reply-context-text"></strong></div><button id="clear-reply" aria-label="Cancel reply">×</button></div>
+        <div class="chat-composer"><textarea id="manual-reply" rows="1" placeholder="Type a reply" aria-label="Type a reply"></textarea><button id="send-manual" type="button">Send</button></div>
+        <div class="locked">Your message is queued for the Windows Teams sender <span>🔒</span></div>
       </section>
       <aside class="draft">
         <header><div><p class="eyebrow">READY TO REVIEW</p><h2>Draft messages</h2></div><span class="badge">Context checked</span></header>

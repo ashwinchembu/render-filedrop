@@ -1785,6 +1785,8 @@ app.post(
       const sourceMessageIds = Array.isArray(req.body?.sourceMessageIds)
         ? req.body.sourceMessageIds.map((id) => cleanText(id, 80)).filter(Boolean)
         : [];
+      const replyToSourceMessageId = cleanText(req.body?.replyToSourceMessageId, 160);
+      const replyToText = cleanText(req.body?.replyToText, 1000);
       if (!recipient || !drafts.length) {
         res.status(400).json({ error: "Recipient and at least one message are required" });
         return;
@@ -1795,7 +1797,36 @@ app.post(
         project: "Mindsight Campaign Implementation",
         category: "APPROVED_SEND",
         tags: ["teams", "approval-desk", "user-approved"],
-        body: `User approved ${drafts.length} separate Teams message${drafts.length === 1 ? "" : "s"} for ${recipient}. Send each MESSAGE below as its own Teams bubble, in order, without combining or rewriting:\n\n${drafts.map((draft, index) => `MESSAGE ${index + 1}:\n"${draft}"`).join("\n\n")}\n\nReply with every exact sent bubble and timestamp. Source FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
+        body: `User approved ${drafts.length} separate Teams message${drafts.length === 1 ? "" : "s"} for ${recipient}. ${replyToSourceMessageId ? `Use Teams Reply on source message ${replyToSourceMessageId}${replyToText ? ` (visible text: "${replyToText}")` : ""}; do not send it as an unrelated new message. ` : ""}Send each MESSAGE below as its own Teams bubble, in order, without combining or rewriting:\n\n${drafts.map((draft, index) => `MESSAGE ${index + 1}:\n"${draft}"`).join("\n\n")}\n\nReply with every exact sent bubble and timestamp. Source FileDrop messages: ${sourceMessageIds.join(", ") || "none"}`
+      });
+      res.status(201).json({ ok: true, messageId: message.id });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.post(
+  "/approvals/api/react",
+  requireConfiguredSecret(uploadPassword, "UPLOAD_PASSWORD"),
+  requireWebPassword,
+  async (req, res, next) => {
+    try {
+      const recipient = cleanText(req.body?.recipient, 120);
+      const sourceMessageId = cleanText(req.body?.sourceMessageId, 160);
+      const messageText = cleanText(req.body?.messageText, 1000);
+      const reaction = cleanText(req.body?.reaction, 30);
+      if (!recipient || !sourceMessageId || !reaction) {
+        res.status(400).json({ error: "Recipient, source message, and reaction are required" });
+        return;
+      }
+      const message = await createMessage({
+        from: "ashwin-main-codex",
+        to: "ashwin-remote-codex",
+        project: "Mindsight Campaign Implementation",
+        category: "APPROVED_REACTION",
+        tags: ["teams", "approval-desk", "user-approved", "reaction"],
+        body: `User approved reaction ${reaction} for ${recipient}. In Teams web, react to source message ${sourceMessageId}${messageText ? ` with visible text "${messageText}"` : ""}. Do not send a text reply. Report the exact reaction and timestamp after Teams confirms it.`
       });
       res.status(201).json({ ok: true, messageId: message.id });
     } catch (error) {
